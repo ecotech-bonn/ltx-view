@@ -7,7 +7,7 @@
  */
 
 import uPlot from '../vendor/uplot/uPlot.esm.js'
-import { parseEdt } from './edt.js'
+import { parseEdt, stripBom } from './edt.js'
 import { parseIparam } from './iparam.js'
 import { buildSeries } from './series.js'
 import { texts } from './i18n.js'
@@ -372,7 +372,7 @@ export function createViewer(el, opts = {}) {
 
 /* Inhalt einer Datei erkennen: 'iparam' (beginnt mit '@100'), 'sysparam' ('@200') oder 'edt' */
 export function detectKind(text) {
-    const first = String(text).replace(/^﻿/, '').trimStart().split(/\r?\n/, 1)[0].trim()
+    const first = stripBom(String(text)).trimStart().split(/\r?\n/, 1)[0].trim()
     if (first === '@100') return 'iparam'
     if (first === '@200') return 'sysparam'
     return 'edt'

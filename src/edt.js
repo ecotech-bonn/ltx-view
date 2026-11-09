@@ -7,6 +7,11 @@
  * Ein gleicher Kopf (z. B. nach <RESET> oder neuem COOKIE ohne Aenderung der Kanaele) setzt den Satz fort.
  */
 
+// Byte-Order-Mark am Dateianfang entfernen (als charCode, damit die Quelle reines ASCII bleibt)
+export function stripBom(s) {
+    return s.charCodeAt(0) === 0xFEFF ? s.substring(1) : s
+}
+
 // Zeitstempel davor gelten als ungueltig (Logger-Uhr nach Reset noch nicht gestellt)
 export const MIN_VALID_TIME = 946684800 // 2000-01-01T00:00:00Z
 
@@ -126,7 +131,7 @@ export function parseEdt(text) {
         set.rows.push(row)
     }
 
-    const lines = String(text).replace(/^﻿/, '').replaceAll('\r', '').split('\n')
+    const lines = stripBom(String(text)).replaceAll('\r', '').split('\n')
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim()
         if (!line) continue

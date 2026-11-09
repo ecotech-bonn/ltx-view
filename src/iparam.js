@@ -4,6 +4,8 @@
  * '@<n>' mit 14 Zeilen (Index 0 = '@<n>'). Leere Zeilen sind gueltige (leere) Werte.
  */
 
+import { stripBom } from './edt.js'
+
 const BASE_LINES = 21
 const CHAN_LINES = 14
 
@@ -30,7 +32,7 @@ function sdiParts(x) {
  * }
  * Wirft einen Error, wenn die Datei keine iparam-Datei ist. */
 export function parseIparam(text) {
-    const lines = String(text).replace(/^﻿/, '').replaceAll('\r', '').split('\n')
+    const lines = stripBom(String(text)).replaceAll('\r', '').split('\n')
     if (lines[0].trim() !== '@100') throw new Error("not an iparam file (missing '@100')")
     if (lines.length < BASE_LINES) throw new Error('iparam file too short')
     const b = lines
