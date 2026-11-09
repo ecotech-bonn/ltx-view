@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<!-- ltx-view - eigenstaendige Seite. Daten per URL (?edt=...&iparam=...&lang=de&title=...) oder Datei/Drag & Drop. -->
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ltx-view</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #f4f5f5;
+            --fg: #3e3d40;
+            --muted: #6f7175;
+            --border: #d5d7da;
+            --accent: #0e7c89;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #161719;
+                --fg: #d8dadd;
+                --muted: #9a9ea3;
+                --border: #3a3c40;
+                --accent: #19aebe;
+            }
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            font-size: 15px;
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        .pick {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75em;
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 1em;
+            margin-bottom: 1em;
+            color: var(--muted);
+        }
+
+        .pick.drag {
+            border-color: var(--accent);
+            color: var(--fg);
+        }
+
+        .pick label {
+            background: var(--accent);
+            color: #fff;
+            border-radius: 6px;
+            padding: 0.45em 0.9em;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .pick input {
+            display: none;
+        }
+
+        .error {
+            color: #c0392b;
+            margin: 0 0 1em 0;
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <div class="pick" id="pick">
+            <label><input type="file" id="files" multiple accept=".edt,.lxp,.txt,.old">
+                <span id="t-open">Dateien öffnen</span></label>
+            <span id="t-hint">.edt (Messdaten) und optional iparam.lxp (Kanal-Infos) – oder hierher ziehen</span>
+        </div>
+        <p class="error" id="error" hidden></p>
+        <div id="chart"></div>
+    </main>
+
+    <script type="module">
+        import { createViewer } from './src/ltx-view.js'
+
+        const q = new URLSearchParams(location.search)
+        const lang = q.get('lang') || (navigator.language.startsWith('de') ? 'de' : 'en')
+        if (lang !== 'de') {
+            document.documentElement.lang = 'en'
+            document.getElementById('t-open').textContent = 'Open files'
+            document.getElementById('t-hint').textContent = '.edt (measured data) and optional iparam.lxp (channel info) – or drop here'
+        }
+        const viewer = createViewer(document.getElementById('chart'), { lang })
+        const errEl = document.getElementById('error')
+        const showError = err => { errEl.textContent = String(err?.message ?? err); errEl.hidden = false }
+        const run = async p => { errEl.hidden = true; try { await p() } catch (err) { showError(err) } }
+
+        // Server-Einsatz: ?edt=<url>&iparam=<url>&title=<text>
+        if (q.get('edt')) {
+            document.getElementById('pick').hidden = true
+            run(() => viewer.loadUrls({ edt: q.get('edt'), iparam: q.get('iparam'), title: q.get('title') ?? undefined }))
+        }
+
+        const pick = document.getElementById('pick')
+        document.getElementById('files').addEventListener('change', ev => run(() => viewer.loadFiles(ev.target.files)))
+        pick.addEventListener('dragover', ev => { ev.preventDefault(); pick.classList.add('drag') })
+        pick.addEventListener('dragleave', () => pick.classList.remove('drag'))
+        pick.addEventListener('drop', ev => {
+            ev.preventDefault()
+            pick.classList.remove('drag')
+            run(() => viewer.loadFiles(ev.dataTransfer.files))
+        })
+    </script>
+</body>
+
+</html>

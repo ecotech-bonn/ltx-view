@@ -1,0 +1,202 @@
+/* ltx-view.css - Gestaltung des Viewers. Farben ueber --lv-* anpassbar (z. B. in der Host-Seite). */
+
+.lv {
+    --lv-fg: #3e3d40;
+    --lv-muted: #6f7175;
+    --lv-bg: #ffffff;
+    --lv-panel: #ffffff;
+    --lv-border: #e3e4e6;
+    --lv-grid: #e9eaeb;
+    --lv-accent: #0e7c89;
+    --lv-warn: #b25e00;
+    --lv-btn: #f1f2f3;
+    --lv-btn-hover: #e4e6e8;
+    --lv-radius: 10px;
+
+    color: var(--lv-fg);
+    font: inherit;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+    min-width: 0;
+}
+
+.lv[data-lv-theme="dark"] {
+    --lv-fg: #d8dadd;
+    --lv-muted: #9a9ea3;
+    --lv-bg: #1c1d1f;
+    --lv-panel: #232427;
+    --lv-border: #36383c;
+    --lv-grid: #34373b;
+    --lv-accent: #19aebe;
+    --lv-warn: #f0a24a;
+    --lv-btn: #2c2e31;
+    --lv-btn-hover: #383a3e;
+}
+
+.lv-empty {
+    color: var(--lv-muted);
+    padding: 2em 0;
+    text-align: center;
+}
+
+.lv-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+}
+
+.lv-title {
+    font-weight: 650;
+    font-size: 1.1em;
+}
+
+.lv-mac {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-weight: 400;
+    font-size: 0.85em;
+    color: var(--lv-muted);
+    margin-left: 0.4em;
+}
+
+.lv-facts {
+    color: var(--lv-muted);
+    font-size: 0.9em;
+}
+
+.lv-notes,
+.lv-warn summary {
+    color: var(--lv-warn);
+    font-size: 0.9em;
+}
+
+.lv-warn ul {
+    margin: 0.3em 0 0 1.2em;
+    padding: 0;
+    font-size: 0.85em;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    max-height: 12em;
+    overflow: auto;
+}
+
+.lv-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+}
+
+.lv-ranges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35em;
+}
+
+.lv-bar button,
+.lv-bar select {
+    font: inherit;
+    font-size: 0.9em;
+    color: var(--lv-fg);
+    background: var(--lv-btn);
+    border: 1px solid var(--lv-border);
+    border-radius: 6px;
+    padding: 0.3em 0.7em;
+    cursor: pointer;
+}
+
+.lv-bar button:hover,
+.lv-bar select:hover {
+    background: var(--lv-btn-hover);
+}
+
+.lv-bar button:focus-visible,
+.lv-bar select:focus-visible {
+    outline: 2px solid var(--lv-accent);
+    outline-offset: 1px;
+}
+
+.lv-tz {
+    font-size: 0.9em;
+    color: var(--lv-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+}
+
+.lv-panels {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+    min-width: 0;
+}
+
+.lv-section {
+    font-size: 0.8em;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--lv-muted);
+    margin: 0.5em 0 0 0;
+}
+
+.lv-panel {
+    background: var(--lv-panel);
+    border: 1px solid var(--lv-border);
+    border-radius: var(--lv-radius);
+    padding: 0.6em 0.6em 0.3em 0.6em;
+    min-width: 0;
+}
+
+.lv-panel h4 {
+    margin: 0 0 0.3em 0.3em;
+    font-size: 0.95em;
+    font-weight: 600;
+}
+
+.lv-panel h4 small {
+    font-weight: 400;
+    color: var(--lv-muted);
+    margin-left: 0.5em;
+}
+
+.lv-plot {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* uPlot an das Thema anpassen */
+.lv .uplot {
+    font-family: inherit;
+    color: var(--lv-fg);
+}
+
+.lv .u-legend {
+    font-size: 0.82em;
+    text-align: left;
+    margin-top: 0.2em;
+    max-height: 8.2em; /* viele Kanaele: Legende scrollt */
+    overflow-y: auto;
+}
+
+.lv .u-legend.u-inline tr {
+    margin-right: 12px;
+}
+
+.lv .u-legend .u-series th {
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.lv .u-legend .u-value {
+    font-variant-numeric: tabular-nums;
+}
+
+.lv .u-legend .u-off > * {
+    opacity: 0.35;
+}
+
+.lv .u-select {
+    background: color-mix(in srgb, var(--lv-accent) 18%, transparent);
+}
