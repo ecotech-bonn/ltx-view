@@ -176,7 +176,7 @@
     font-size: 0.82em;
     text-align: left;
     margin-top: 0.2em;
-    max-height: 8.2em; /* viele Kanaele: Legende scrollt */
+    max-height: 4.6em; /* viele Kanaele: Legende scrollt, feste Hoehe (nur Namen, keine Live-Werte) */
     overflow-y: auto;
 }
 
@@ -199,4 +199,201 @@
 
 .lv .u-select {
     background: color-mix(in srgb, var(--lv-accent) 18%, transparent);
+}
+
+/* ---------- Zeitraum Von/Bis ---------- */
+.lv-span {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    font-size: 0.9em;
+    color: var(--lv-muted);
+}
+
+.lv-span label {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+}
+
+.lv-span input {
+    font: inherit;
+    color: var(--lv-fg);
+    background: var(--lv-btn);
+    border: 1px solid var(--lv-border);
+    border-radius: 6px;
+    padding: 0.25em 0.4em;
+    color-scheme: inherit;
+}
+
+.lv[data-lv-theme="dark"] .lv-span input {
+    color-scheme: dark;
+}
+
+.lv-span input.lv-bad {
+    border-color: var(--lv-warn);
+}
+
+.lv-pick-btn {
+    font-weight: 600;
+}
+
+/* ---------- Auswahl der Diagramme ---------- */
+.lv-pick {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+}
+
+.lv-pick-title {
+    font-weight: 600;
+}
+
+.lv-pg {
+    background: var(--lv-panel);
+    border: 1px solid var(--lv-border);
+    border-radius: var(--lv-radius);
+    padding: 0.55em 0.75em;
+}
+
+.lv-pg-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.3em 0.6em;
+    cursor: pointer;
+}
+
+.lv-pg-main input {
+    align-self: center;
+}
+
+.lv-pg-name {
+    font-weight: 600;
+}
+
+.lv-pg-name small {
+    font-weight: 400;
+    color: var(--lv-muted);
+    margin-left: 0.3em;
+}
+
+.lv-pg-info {
+    color: var(--lv-muted);
+    font-size: 0.9em;
+}
+
+.lv-pg details {
+    margin-top: 0.35em;
+    font-size: 0.9em;
+}
+
+.lv-pg summary {
+    cursor: pointer;
+    color: var(--lv-accent);
+}
+
+.lv-pg-ch {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11em, 1fr));
+    gap: 0.2em 0.8em;
+    margin-top: 0.4em;
+    max-height: 14em;
+    overflow-y: auto;
+}
+
+.lv-pg-ch label {
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.lv-pick-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+    margin-top: 0.3em;
+}
+
+.lv-pick-bar button {
+    font: inherit;
+    font-size: 0.95em;
+    color: var(--lv-fg);
+    background: var(--lv-btn);
+    border: 1px solid var(--lv-border);
+    border-radius: 6px;
+    padding: 0.4em 0.9em;
+    cursor: pointer;
+}
+
+.lv-pick-bar .lv-primary {
+    margin-left: auto;
+    background: var(--lv-accent);
+    border-color: var(--lv-accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.lv[data-lv-theme="dark"] .lv-pick-bar .lv-primary {
+    color: #0b1f22;
+}
+
+.lv-pick-bar .lv-primary:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* ---------- Werte am Cursor (schwebend, ohne Einfluss auf das Layout) ---------- */
+.lv-tip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 10;
+    pointer-events: none;
+    background: var(--lv-panel);
+    color: var(--lv-fg);
+    border: 1px solid var(--lv-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    padding: 0.35em 0.55em;
+    font-size: 0.8em;
+    line-height: 1.45;
+    white-space: nowrap;
+    max-width: 22em;
+}
+
+.lv-tip[hidden] {
+    display: none;
+}
+
+.lv-tip-t {
+    font-weight: 600;
+    margin-bottom: 0.15em;
+}
+
+.lv-tip-r {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+}
+
+.lv-tip-r i {
+    width: 0.7em;
+    height: 0.7em;
+    border-radius: 2px;
+    flex: none;
+}
+
+.lv-tip-r span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.lv-tip-r b {
+    margin-left: auto;
+    padding-left: 0.8em;
+    font-variant-numeric: tabular-nums;
+}
+
+.lv-tip-more {
+    color: var(--lv-muted);
 }

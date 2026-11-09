@@ -9,7 +9,10 @@ Verwendet in **enviLog** (Bluetooth-App) und als eigenständige Seite, z. B. auf
 ## Funktionen
 
 - ein Diagramm je Einheit, Gerätewerte (Kanäle 90–99: Batterie, Innentemperatur …) getrennt
-- gemeinsame Zeitachse: Ziehen = zoomen (alle Diagramme), Doppelklick = alles, Knöpfe Alles / 30 / 7 / 1 Tag(e)
+- bei mehreren Diagrammen zuerst eine Auswahl (Diagramme, auf Wunsch einzelne Kanäle); jederzeit „Diagramme wählen“
+- gemeinsame Zeitachse: Ziehen = zoomen (alle Diagramme), Doppelklick = alles, Knöpfe Alles / 30 / 7 / 1 Tag(e),
+  Zeitraum frei über Von/Bis
+- Werte am Cursor in einem schwebenden Feld (Layout bleibt ruhig), Legende schaltet Kanäle ein/aus
 - Zeitanzeige: Loggerzeit (UTC-Versatz aus iparam), UTC oder Ortszeit des Geräts
 - echte Lücken: Fehlerwerte (`NoReply` …) und Messpausen werden nicht überbrückt; einzelne Werte als Punkt
 - Markierungen: neuer Parametersatz (gestrichelt), Reset (Marke oben), Alarmgrenzen aus iparam
@@ -48,7 +51,8 @@ Optionen von `createViewer(el, opts)`:
 | `lang` | Browsersprache | `'de'` oder `'en'` |
 | `theme` | `'auto'` | `'light'`, `'dark'`; `'auto'` = `data-theme` am `<html>`, sonst Systemeinstellung |
 | `time` | `'logger'` bzw. `'local'` | `'logger'` (nur mit iparam), `'utc'`, `'local'` |
-| `height`, `hkHeight` | 260, 150 | Diagrammhöhe in px (Messwerte, Gerätewerte) |
+| `pick` | `true` | bei mehreren Diagrammen zuerst die Auswahl zeigen; `false` = direkt alle Messwert-Diagramme |
+| `height`, `hkHeight` | `'auto'` | Diagrammhöhe in px oder `'auto'` (nach Fensterhöhe: Messwerte 300–560, Gerätewerte 200–320) |
 | `title` | – | Titel, falls weder iparam noch EDT einen Namen liefern |
 | `injectCss` | `true` | CSS selbst laden; `false`, wenn die Host-Seite `src/ltx-view.css` und `vendor/uplot/uPlot.min.css` einbindet |
 
