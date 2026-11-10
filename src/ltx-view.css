@@ -164,7 +164,7 @@
 /* Diagramm links, Kanalliste rechts; schmal (Handy): Kanalliste darunter */
 .lv-body {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) var(--lv-legw, auto); /* --lv-legw: breiteste Kanalliste (view.js) */
     gap: 0.6em;
     align-items: start;
 }

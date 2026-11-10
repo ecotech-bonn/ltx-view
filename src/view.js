@@ -440,6 +440,7 @@ export function createViewer(el, opts = {}) {
             panels.innerHTML = ''
             let lastHk = null
             st.building = true
+            const built = []
             for (const g of s.groups) {
                 if (!st.on.has(g.key)) continue
                 if (g.hk !== lastHk) {
@@ -455,6 +456,19 @@ export function createViewer(el, opts = {}) {
                 sec.style.setProperty('--lv-h', height + 'px')
                 sec.innerHTML = `<h4>${groupTitle(g)}</h4><div class="lv-body"><div class="lv-plot"></div>${legendHtml(g)}</div>`
                 panels.appendChild(sec)
+                built.push({ g, sec, height })
+            }
+            // Kanallisten gleich breit, damit die Zeitachsen aller Diagramme untereinander stehen. Gemessen wird der
+            // breiteste Eintrag (gleich, ob die Liste gerade rechts oder - schmal - unter dem Diagramm steht)
+            panels.style.removeProperty('--lv-legw')
+            let legW = 0
+            for (const { sec } of built) {
+                const ul = sec.querySelector('.lv-legend')
+                const cap = 15 * (parseFloat(getComputedStyle(ul).fontSize) || 12)
+                for (const li of ul.querySelectorAll('li:not(.lv-leg-all)')) legW = Math.max(legW, Math.min(cap, li.getBoundingClientRect().width))
+            }
+            if (legW) panels.style.setProperty('--lv-legw', Math.ceil(legW) + 'px')
+            for (const { g, sec, height } of built) {
                 const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height)
                 st.plots.push(u)
                 bindLegend(sec.querySelector('.lv-legend'), u, g)
