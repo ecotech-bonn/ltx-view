@@ -99,3 +99,20 @@ test('series: gap reaches the next value although other channels have points in 
     const s2 = buildSeries(parseEdt('!U 0:m\n!1700000000 0:1\n!+600 0:2\n!+600 0:3\n!+600 0:4\n!+6000 0:5\n!+6000 0:6\n!+600 0:7\n!+600 0:8\n!+600 0:9\n'), null)
     assert.deepEqual(s2.channels[0].isolated.map(i => s2.channels[0].data[i]), [5])
 })
+
+test('gaps: normal interval detected locally, interval change stays connected', async () => {
+    const { findGaps } = await import('../src/series.js')
+    const seq = (t0, step, n) => Array.from({ length: n }, (_, i) => t0 + i * step)
+    // 10 min, dann 1 h (anderer Parametersatz): kein Aussetzer
+    const a = [...seq(0, 600, 20), ...seq(600 * 19 + 3600, 3600, 20)]
+    assert.deepEqual(findGaps(a), [])
+    // 1 h, dann 1 min (Alarm-Intervall) und zurueck: kein Aussetzer
+    const b = [...seq(0, 3600, 15), ...seq(3600 * 14 + 60, 60, 30), ...seq(3600 * 14 + 60 * 30 + 3600, 3600, 15)]
+    assert.deepEqual(findGaps(b), [])
+    // ein fehlender Wert (20 min bei 10 min) = Aussetzer, null-Punkt 10 min nach dem letzten Wert
+    const c = [...seq(0, 600, 10), ...seq(600 * 11, 600, 10)]
+    assert.deepEqual(findGaps(c), [{ i: 10, step: 600 }])
+    // leichtes Zittern (+-20 %) bleibt verbunden
+    const d = seq(0, 600, 30).map((v, i) => v + (i % 3 - 1) * 60)
+    assert.deepEqual(findGaps(d), [])
+})

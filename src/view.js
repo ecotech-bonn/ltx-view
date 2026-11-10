@@ -3,9 +3,10 @@
  *   const v = createViewer(element, { lang: 'de' })
  *   v.setData({ edt: text, iparam: text })          // iparam optional
  *
- * Ablauf: bei mehreren Diagrammen zuerst Auswahl (Diagramme, optional einzelne Kanaele), dann die Diagramme.
- * Bedienung: Ziehen = Zeitbereich zoomen (alle Diagramme), Doppelklick = alles, Von/Bis = Zeitraum frei,
- * Legende = Kanal ein/aus, Werte am Cursor im schwebenden Feld (verschiebt das Layout nicht).
+ * Bedienung: Leiste oben = Diagramme ein/aus (sofort, Zoom bleibt), Kanalliste rechts am Diagramm = Kanal ein/aus,
+ * Ziehen = Zeitbereich zoomen (alle Diagramme), Doppelklick = alles, Von/Bis = Zeitraum frei,
+ * Werte am Cursor im schwebenden Feld (verschiebt das Layout nicht). Messpunkte als kleine Punkte auf der Kurve,
+ * sobald sie weit genug auseinander liegen (Zoom); einzelne Werte zwischen Luecken immer.
  */
 
 import uPlot from '../vendor/uplot/uPlot.esm.js'
@@ -18,6 +19,8 @@ const PALETTE = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b
 const color = i => i < PALETTE.length ? PALETTE[i] : `hsl(${Math.round((i * 137.508) % 360)} 65% 45%)`
 const DAY = 86400
 const TIP_ROWS = 12 // max. Kanaele im Werte-Feld
+const PT_SIZE = 4 // Messpunkt (Durchmesser, px)
+const PT_SPACE = 6 // Messpunkte erst zeigen, wenn sie mind. so weit (px) auseinander liegen
 
 let cssDone = false
 function injectCss() {
@@ -56,19 +59,18 @@ function durText(sec) {
  *   lang       'de' | 'en' (Standard: Browsersprache)
  *   theme      'auto' | 'light' | 'dark' ('auto': data-theme am <html>, sonst Systemeinstellung)
  *   time       'logger' | 'utc' | 'local' (Standard: 'logger', wenn der UTC-Versatz aus iparam bekannt ist, sonst 'local')
- *   pick       true: bei mehreren Diagrammen zuerst die Auswahl zeigen (Standard), false: alle Messwert-Diagramme
  *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560), hkHeight dito (200-320)
  *   injectCss  CSS automatisch laden (true)
  *   title      Titel, falls weder iparam noch EDT einen Namen liefern */
 export function createViewer(el, opts = {}) {
-    const o = { theme: 'auto', height: 'auto', hkHeight: 'auto', pick: true, injectCss: true, ...opts }
+    const o = { theme: 'auto', height: 'auto', hkHeight: 'auto', injectCss: true, ...opts }
     if (o.injectCss) injectCss()
     const st = {
         edt: null, ip: null, ipError: '', series: null, plots: [], tips: new Map(),
         syncing: false, building: false, hover: null,
         time: o.time ?? null,
-        view: 'charts', // 'pick' | 'charts'
-        sel: new Map(), // Gruppen-Key -> Set der gewaehlten Kanaele
+        on: new Set(), // Gruppen-Keys der angezeigten Diagramme
+        off: new Map(), // Gruppen-Key -> Set ausgeblendeter Kanaele
         range: null, // gewaehlter Zeitraum in UTC-Sekunden { min, max } (bleibt bei Zeitzonen-Wechsel)
     }
     const syncKey = 'lv' + Math.random().toString(36).slice(2)
@@ -200,7 +202,9 @@ export function createViewer(el, opts = {}) {
         tip.style.transform = `translate(${Math.max(0, Math.round(x))}px, ${Math.max(0, Math.round(y))}px)`
     }
 
-    function makePlot(g, chans, xs, mount, tm, markers, theme, onRange) {
+    function makePlot(g, xs, mount, tm, markers, theme, onRange, height) {
+        const chans = g.channels
+        const off = st.off.get(g.key)
         const nf = new Intl.NumberFormat(locale, { maximumFractionDigits: 6 })
         const fg = cssVar('--lv-fg', theme === 'dark' ? '#d8dadd' : '#3e3d40')
         const grid = cssVar('--lv-grid', theme === 'dark' ? '#33373b' : '#e6e7e8')
@@ -211,16 +215,19 @@ export function createViewer(el, opts = {}) {
             stroke: color(i),
             width: 1.5,
             spanGaps: false,
-            // Einzelwerte zwischen Luecken als Punkt, sonst Punkte nur bei wenigen Werten (uPlot-Standard)
-            points: { filter: (u, si, show) => show ? null : (c.isolated.length ? c.isolated : null) },
+            show: !off.has(c.ch),
+            // Messpunkte, sobald sie mind. PT_SPACE px auseinander liegen (uPlot-Regel), Einzelwerte zwischen
+            // Luecken immer
+            points: { size: PT_SIZE, width: 1, space: PT_SPACE, stroke: color(i), fill: color(i),
+                filter: (u, si, show) => show ? null : (c.isolated.length ? c.isolated : null) },
         }))
         const opts = {
             width: mount.clientWidth || 600,
-            height: plotHeight(g.hk),
+            height,
             fmtDate: tpl => uPlot.fmtDate(tpl, names),
             cursor: { sync: { key: syncKey }, drag: { x: true, y: false } },
             scales: { x: { time: true } },
-            legend: { live: false }, // nur Namen (Ein/Aus), Werte im schwebenden Feld
+            legend: { show: false }, // eigene Kanalliste rechts, Werte im schwebenden Feld
             series,
             axes: [
                 { stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, values: axisStamps(), size: 46 },
@@ -296,6 +303,7 @@ export function createViewer(el, opts = {}) {
         const facts = [`${fmtTime(s.stats.t0 + tm.shift, tm)} – ${fmtTime(s.stats.t1 + tm.shift, tm)}`,
             `${s.stats.rows} ${t.rows}`, `${s.channels.length} ${t.channels}`]
         if (ip?.period) facts.push(`${t.interval} ${durText(ip.period)}`)
+        else if (s.stats.step) facts.push(`${t.intervalAuto} ${durText(s.stats.step)}`)
         if (s.sets.length > 1) facts.push(`${s.sets.length} ${t.sets}`)
         const notes = []
         if (s.stats.errors) notes.push(t.errors(s.stats.errors))
@@ -314,79 +322,48 @@ export function createViewer(el, opts = {}) {
             </div>`
     }
 
-    // ---------- Auswahl der Diagramme / Kanaele ----------
-    function renderPick(s, tm) {
-        const nfi = new Intl.NumberFormat(locale)
-        let html = headHtml(s, tm) + `<div class="lv-pick"><div class="lv-pick-title">${esc(t.pickTitle)}</div>`
-        let lastHk = null
-        s.groups.forEach((g, gi) => {
-            if (g.hk !== lastHk) {
-                html += `<h3 class="lv-section">${esc(g.hk ? t.device : t.measurements)}</h3>`
-                lastHk = g.hk
-            }
-            const sel = st.sel.get(g.key)
-            const values = g.channels.reduce((n, c) => n + c.count, 0)
-            html += `<div class="lv-pg" data-g="${gi}">
-                <label class="lv-pg-main"><input type="checkbox" class="lv-pg-cb">
-                    <span class="lv-pg-name">${groupTitle(g)}</span>
-                    <span class="lv-pg-info">${esc(t.nChannels(g.channels.length))} · ${esc(t.nValues(nfi.format(values)))}</span></label>`
-            if (g.channels.length > 1) {
-                html += `<details><summary>${esc(t.singleChannels)}</summary><div class="lv-pg-ch">`
-                    + g.channels.map(c => `<label><input type="checkbox" data-ch="${c.ch}"${sel.has(c.ch) ? ' checked' : ''}> ${esc(chanLabel(c))}</label>`).join('')
-                    + `</div></details>`
-            }
-            html += `</div>`
-        })
-        html += `<div class="lv-pick-bar"><button type="button" data-act="all">${esc(t.selAll)}</button>
-                <button type="button" data-act="none">${esc(t.selNone)}</button>
-                <button type="button" class="lv-primary" data-act="show"></button></div></div>`
-        el.innerHTML = html
-
-        const showBtn = el.querySelector('[data-act="show"]')
-        const sync = () => {
-            let n = 0
-            el.querySelectorAll('.lv-pg').forEach(div => {
-                const g = s.groups[Number(div.dataset.g)]
-                const sel = st.sel.get(g.key)
-                const cb = div.querySelector('.lv-pg-cb')
-                cb.checked = sel.size > 0
-                cb.indeterminate = sel.size > 0 && sel.size < g.channels.length
-                div.querySelectorAll('input[data-ch]').forEach(c => { c.checked = sel.has(Number(c.dataset.ch)) })
-                if (sel.size) n++
-            })
-            showBtn.textContent = t.show(n)
-            showBtn.disabled = n === 0
-        }
-        el.querySelectorAll('.lv-pg').forEach(div => {
-            const g = s.groups[Number(div.dataset.g)]
-            const sel = st.sel.get(g.key)
-            div.querySelector('.lv-pg-cb').addEventListener('change', ev => {
-                sel.clear()
-                if (ev.target.checked) g.channels.forEach(c => sel.add(c.ch))
-                sync()
-            })
-            div.querySelectorAll('input[data-ch]').forEach(c => c.addEventListener('change', () => {
-                const ch = Number(c.dataset.ch)
-                if (c.checked) sel.add(ch)
-                else sel.delete(ch)
-                sync()
-            }))
-        })
-        const setAll = on => {
-            for (const g of s.groups) {
-                const sel = st.sel.get(g.key)
-                sel.clear()
-                if (on) g.channels.forEach(c => sel.add(c.ch))
-            }
-            sync()
-        }
-        el.querySelector('[data-act="all"]').addEventListener('click', () => setAll(true))
-        el.querySelector('[data-act="none"]').addEventListener('click', () => setAll(false))
-        showBtn.addEventListener('click', () => { st.view = 'charts'; render() })
-        sync()
+    // ---------- Diagramme ----------
+    // Knopf je Diagramm in der Auswahl-Leiste (ein/aus)
+    function chipHtml(g) {
+        const label = g.hk ? g.channels.map(chanLabel).join(', ') : (g.unit || t.noUnit)
+        const info = g.hk ? (g.unit || t.noUnit) : t.nChannels(g.channels.length)
+        const values = new Intl.NumberFormat(locale).format(g.channels.reduce((n, c) => n + c.count, 0))
+        return `<button type="button" class="lv-chip" data-key="${esc(g.key)}" aria-pressed="${st.on.has(g.key)}"`
+            + ` title="${esc(t.nValues(values))}"><span class="lv-chip-box" aria-hidden="true"></span>`
+            + `<span class="lv-chip-name">${esc(label)}</span><small>${esc(info)}</small></button>`
     }
 
-    // ---------- Diagramme ----------
+    // Kanalliste rechts am Diagramm: Kanal ein/aus (ohne Neuaufbau)
+    function legendHtml(g) {
+        const off = st.off.get(g.key)
+        let html = g.channels.map((c, i) => `<li><button type="button" data-i="${i + 1}" aria-pressed="${!off.has(c.ch)}">`
+            + `<i style="background:${color(i)}"></i><span>${esc(chanLabel(c))}</span></button></li>`).join('')
+        if (g.channels.length > 3) {
+            html = `<li class="lv-leg-all"><button type="button" data-all="1">${esc(t.selAll)}</button>`
+                + `<button type="button" data-all="0">${esc(t.selNone)}</button></li>` + html
+        }
+        return `<ul class="lv-legend" aria-label="${esc(t.channels)}">${html}</ul>`
+    }
+
+    function bindLegend(ul, u, g) {
+        const off = st.off.get(g.key)
+        const set = (i, show) => {
+            const c = g.channels[i - 1]
+            if (show) off.delete(c.ch)
+            else off.add(c.ch)
+            ul.querySelector(`[data-i="${i}"]`).setAttribute('aria-pressed', String(show))
+            if (u.series[i].show !== show) u.setSeries(i, { show })
+        }
+        ul.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => {
+            const i = Number(b.dataset.i)
+            set(i, !u.series[i].show)
+        }))
+        ul.querySelectorAll('[data-all]').forEach(b => b.addEventListener('click', () => {
+            const show = b.dataset.all === '1'
+            u.batch(() => g.channels.forEach((c, k) => set(k + 1, show)))
+        }))
+    }
+
     function renderCharts(s, tm, theme) {
         const ip = st.ip
         const span = s.stats.t1 - s.stats.t0
@@ -394,11 +371,19 @@ export function createViewer(el, opts = {}) {
         if (Number.isInteger(ip?.utcOffset)) timeOpts.push(['logger', t.loggerTime(offText(ip.utcOffset))])
         timeOpts.push(['utc', t.utc], ['local', t.localTime])
         const ranges = [30, 7, 1].filter(d => d * DAY < span)
-        const canPick = s.groups.length > 1
 
-        el.innerHTML = headHtml(s, tm) + `<div class="lv-bar">
-                <div class="lv-ranges">${canPick ? `<button type="button" class="lv-pick-btn">${esc(t.choose)}</button>` : ''}
-                    <button type="button" data-days="0">${esc(t.all)}</button>${ranges.map(d =>
+        let selHtml = ''
+        if (s.groups.length > 1) {
+            const row = hk => {
+                const gs = s.groups.filter(g => g.hk === hk)
+                return gs.length ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(hk ? t.device : t.measurements)}</span>`
+                    + gs.map(chipHtml).join('') + `</div>` : ''
+            }
+            selHtml = `<div class="lv-sel" role="group" aria-label="${esc(t.charts)}">${row(false)}${row(true)}</div>`
+        }
+
+        el.innerHTML = headHtml(s, tm) + selHtml + `<div class="lv-bar">
+                <div class="lv-ranges"><button type="button" data-days="0">${esc(t.all)}</button>${ranges.map(d =>
                     `<button type="button" data-days="${d}">${esc(t.days(d))}</button>`).join('')}</div>
                 <div class="lv-span">
                     <label>${esc(t.from)} <input type="datetime-local" class="lv-from" step="60"></label>
@@ -421,7 +406,10 @@ export function createViewer(el, opts = {}) {
             fromEl.classList.remove('lv-bad')
             toEl.classList.remove('lv-bad')
         }
-        const setX = (min, max) => st.plots[0]?.setScale('x', { min, max }) // Hook uebertraegt auf alle
+        const setX = (min, max) => {
+            if (st.plots.length) st.plots[0].setScale('x', { min, max }) // Hook uebertraegt auf alle
+            else onRange(min, max) // kein Diagramm gewaehlt: Zeitraum trotzdem merken
+        }
         const applyInputs = () => {
             const a = fromInput(fromEl.value, tm), b = fromInput(toEl.value, tm)
             const ok = a !== null && b !== null && a < b
@@ -435,7 +423,6 @@ export function createViewer(el, opts = {}) {
             const d = Number(b.dataset.days)
             setX(d ? Math.max(x0, x1 - d * DAY) : x0, x1)
         }))
-        el.querySelector('.lv-pick-btn')?.addEventListener('click', () => { st.view = 'pick'; render() })
         el.querySelector('.lv-tz select').addEventListener('change', ev => { st.time = ev.target.value; render() })
 
         const markers = []
@@ -446,31 +433,49 @@ export function createViewer(el, opts = {}) {
 
         const xs = tm.shift ? s.x.map(v => v + tm.shift) : s.x
         const panels = el.querySelector('.lv-panels')
-        let lastHk = null
-        st.building = true
-        for (const g of s.groups) {
-            const sel = st.sel.get(g.key)
-            const chans = g.channels.filter(c => sel.has(c.ch))
-            if (!chans.length) continue
-            if (g.hk !== lastHk) {
-                const h = document.createElement('h3')
-                h.className = 'lv-section'
-                h.textContent = g.hk ? t.device : t.measurements
-                panels.appendChild(h)
-                lastHk = g.hk
+
+        // Diagramme (neu) aufbauen, z. B. nach Ein-/Ausschalten in der Leiste; Zeitraum bleibt
+        const buildPanels = () => {
+            destroyPlots()
+            panels.innerHTML = ''
+            let lastHk = null
+            st.building = true
+            for (const g of s.groups) {
+                if (!st.on.has(g.key)) continue
+                if (g.hk !== lastHk) {
+                    const h = document.createElement('h3')
+                    h.className = 'lv-section'
+                    h.textContent = g.hk ? t.device : t.measurements
+                    panels.appendChild(h)
+                    lastHk = g.hk
+                }
+                const height = plotHeight(g.hk)
+                const sec = document.createElement('section')
+                sec.className = 'lv-panel' + (g.hk ? ' lv-panel-hk' : '')
+                sec.style.setProperty('--lv-h', height + 'px')
+                sec.innerHTML = `<h4>${groupTitle(g)}</h4><div class="lv-body"><div class="lv-plot"></div>${legendHtml(g)}</div>`
+                panels.appendChild(sec)
+                const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height)
+                st.plots.push(u)
+                bindLegend(sec.querySelector('.lv-legend'), u, g)
             }
-            const part = chans.length < g.channels.length ? ` <small>${esc(t.ofChannels(chans.length, g.channels.length))}</small>` : ''
-            const sec = document.createElement('section')
-            sec.className = 'lv-panel' + (g.hk ? ' lv-panel-hk' : '')
-            sec.innerHTML = `<h4>${groupTitle(g)}${part}</h4><div class="lv-plot"></div>`
-            panels.appendChild(sec)
-            st.plots.push(makePlot(g, chans, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange))
+            st.building = false
+            if (!st.plots.length) panels.innerHTML = `<div class="lv-empty">${esc(t.noChart)}</div>`
+            const r = st.range
+            if (r) setX(r.min + tm.shift, r.max + tm.shift)
+            else onRange(x0, x1)
+            lastWidth = el.clientWidth
         }
-        st.building = false
-        const r = st.range
-        if (r && st.plots.length) setX(r.min + tm.shift, r.max + tm.shift)
-        else onRange(x0, x1)
-        lastWidth = el.clientWidth
+
+        el.querySelectorAll('.lv-chip').forEach(b => b.addEventListener('click', () => {
+            const key = b.dataset.key
+            const on = !st.on.has(key)
+            if (on) st.on.add(key)
+            else st.on.delete(key)
+            b.setAttribute('aria-pressed', String(on))
+            buildPanels()
+        }))
+        buildPanels()
     }
 
     function render() {
@@ -484,9 +489,7 @@ export function createViewer(el, opts = {}) {
             el.innerHTML = `<div class="lv-empty">${esc(t.noData)}</div>`
             return
         }
-        const tm = timeMode()
-        if (st.view === 'pick') renderPick(s, tm)
-        else renderCharts(s, tm, theme)
+        renderCharts(s, timeMode(), theme)
     }
 
     const api = {
@@ -505,11 +508,11 @@ export function createViewer(el, opts = {}) {
                 }
             }
             st.series = buildSeries(st.edt, st.ip)
-            // Vorauswahl: alle Messwert-Diagramme (bei nur einem Diagramm dieses)
+            // Vorauswahl: alle Messwert-Diagramme (gibt es keine: alle Diagramme), alle Kanaele sichtbar
             const groups = st.series.groups
-            st.sel = new Map(groups.map(g => [g.key, new Set(!g.hk || groups.length === 1 ? g.channels.map(c => c.ch) : [])]))
-            if (![...st.sel.values()].some(v => v.size)) groups.forEach(g => st.sel.set(g.key, new Set(g.channels.map(c => c.ch))))
-            st.view = o.pick && groups.length > 1 ? 'pick' : 'charts'
+            const meas = groups.filter(g => !g.hk)
+            st.on = new Set((meas.length ? meas : groups).map(g => g.key))
+            st.off = new Map(groups.map(g => [g.key, new Set()]))
             st.range = null
             render()
             return st.series
@@ -542,7 +545,7 @@ export function createViewer(el, opts = {}) {
             if (edt === null) throw new Error('no EDT file')
             return api.setData({ edt, iparam, title })
         },
-        /* Optionen aendern (lang, theme, time, height, hkHeight, pick) und neu zeichnen */
+        /* Optionen aendern (lang, theme, time, height, hkHeight) und neu zeichnen */
         setOptions(n = {}) {
             Object.assign(o, n)
             if (n.time !== undefined) st.time = n.time

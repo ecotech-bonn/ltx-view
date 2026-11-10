@@ -4,30 +4,48 @@
  * Gruppen (= ein Diagramm): Messkanaele (0-89) nach Einheit, HK-Kanaele (90-99) nach Einheit.
  * Werte in den Datenarrays (uPlot-Konvention):
  *   Zahl      Messwert
- *   null      Luecke: Fehlertext (z. B. NoReply) oder Messpause laenger als erwartet
- *   undefined Kanal hat zu diesem Zeitpunkt keinen Eintrag (Linie wird durchgezogen)
+ *   null      Luecke: Fehlertext (z. B. NoReply) oder Aussetzer (Abstand deutlich groesser als normal)
+ *   undefined Kanal hat zu diesem Zeitpunkt keinen Eintrag (Linie wird durchgezogen = interpoliert)
+ *
+ * Normaler Messabstand: wird je Kanal aus den Daten ermittelt, und zwar lokal (Median der Abstaende kurz davor
+ * und kurz danach). So bleiben wechselnde Messintervalle (anderer Parametersatz, Alarm-Intervall, HK seltener)
+ * verbunden; nur ein Abstand, der groesser ist als normal davor UND danach, gilt als Aussetzer.
  */
 
 import { parseValue } from './edt.js'
 
 export const HK_FIRST = 90
+const WIN = 8 // Abstaende je Seite fuer den lokalen Median
+
+function median(a) {
+    if (!a.length) return 0
+    const b = [...a].sort((x, y) => x - y)
+    return b[b.length >> 1]
+}
 
 function medianStep(times) {
     if (times.length < 3) return 0
     const d = []
     for (let i = 1; i < times.length; i++) d.push(times[i] - times[i - 1])
-    d.sort((a, b) => a - b)
-    return d[d.length >> 1]
+    return median(d)
 }
 
-// Erwarteter Abstand je Kanal: iparam-Messintervall (HK: x HK-Reload). Ohne iparam: Messkanaele typischer
-// Abstand aller Messzeilen des Loggers (rowStep), HK-Kanaele typischer Abstand ihrer eigenen Werte.
-function expectedStep(times, ch, ip, rowStep) {
-    if (ip?.period > 0) {
-        if (ch < HK_FIRST) return ip.period
-        if (ip.hkReload > 0) return ip.period * ip.hkReload
+/* Aussetzer finden. times: sortiert. -> [{ i, step }]: Luecke zwischen times[i-1] und times[i], step = normaler
+ * Abstand davor (fuer den null-Punkt). Abstand d[i] ist ein Aussetzer, wenn d > factor x max(Median davor,
+ * Median danach); fehlt eine Seite, zaehlt die andere. Mit weniger als 3 Abstaenden keine Bewertung. */
+export function findGaps(times, factor = 1.5) {
+    const n = times.length
+    if (n < 4) return []
+    const d = new Array(n).fill(0)
+    for (let i = 1; i < n; i++) d[i] = times[i] - times[i - 1]
+    const res = []
+    for (let i = 1; i < n; i++) {
+        const before = median(d.slice(Math.max(1, i - WIN), i))
+        const after = median(d.slice(i + 1, i + 1 + WIN))
+        const ref = Math.max(before, after)
+        if (ref > 0 && d[i] > factor * ref) res.push({ i, step: before || after })
     }
-    return ch < HK_FIRST && rowStep > 0 ? rowStep : medianStep(times)
+    return res
 }
 
 // Luecke bis zum naechsten bzw. vorherigen Wert ausdehnen: uPlot schneidet nur aufeinanderfolgende null aus,
@@ -60,10 +78,10 @@ function isolatedIdx(data) {
 }
 
 /* edt: Ergebnis von parseEdt(), ip: Ergebnis von parseIparam() oder null
- * opts: { gapFactor: Abstand > gapFactor x erwartet = Luecke (Standard 2.5) }
+ * opts: { gapFactor: Abstand > gapFactor x normaler Abstand = Aussetzer (Standard 1.5, d. h. ab einem fehlenden Wert) }
  * -> { x: [zeit...] (UTC-Sekunden, sortiert), channels: [...], groups: [...], sets: [{no, t0, t1, cookie}], events, stats } */
 export function buildSeries(edt, ip = null, opts = {}) {
-    const gapFactor = opts.gapFactor ?? 2.5
+    const gapFactor = opts.gapFactor ?? 1.5
     const per = new Map() // kanal -> { pts: Map(t -> wert|null), units: Set, unit, errors, alarms }
     const sets = []
     const rowTimes = new Set()
@@ -86,19 +104,16 @@ export function buildSeries(edt, ip = null, opts = {}) {
         }
     }
 
-    // Luecken: zusaetzlicher null-Punkt kurz nach dem letzten Wert vor einer Messpause
+    // Aussetzer: zusaetzlicher null-Punkt einen normalen Abstand nach dem letzten Wert davor
     const rowStep = medianStep([...rowTimes].sort((a, b) => a - b))
     const xs = new Set()
     const chans = []
     for (const ch of [...per.keys()].sort((a, b) => a - b)) {
         const c = per.get(ch)
         const times = [...c.pts.keys()].sort((a, b) => a - b)
-        const step = expectedStep(times, ch, ip, rowStep)
-        if (step > 0) {
-            for (let i = 1; i < times.length; i++) {
-                if (times[i] - times[i - 1] > gapFactor * step) c.pts.set(times[i - 1] + step, null)
-            }
-        }
+        const step = medianStep(times)
+        const gaps = findGaps(times, gapFactor)
+        for (const g of gaps) c.pts.set(times[g.i - 1] + g.step, null)
         for (const t of c.pts.keys()) xs.add(t)
         const meta = ip?.channels?.[ch]
         chans.push({
@@ -110,6 +125,7 @@ export function buildSeries(edt, ip = null, opts = {}) {
             errors: c.errors,
             alarms: c.alarms,
             count: times.length,
+            gaps: gaps.length,
             alarmHi: meta?.alarm ? meta.alarmHi : null,
             alarmLo: meta?.alarm ? meta.alarmLo : null,
             meta: meta ?? null,
@@ -152,6 +168,8 @@ export function buildSeries(edt, ip = null, opts = {}) {
             alarms: chans.reduce((n, c) => n + c.alarms, 0),
             invalidTime: edt.invalidTime,
             warnings: edt.warnCnt,
+            step: rowStep, // typischer Abstand der Messzeilen (ermittelt)
+            gaps: chans.reduce((n, c) => n + c.gaps, 0),
         },
     }
 }
