@@ -21,7 +21,7 @@ Verwendet in **enviLog** (Bluetooth-App) und als eigenständige Seite, z. B. auf
   aus den Daten ermittelt (Median der 8 Abstände davor bzw. danach), ein Abstand > 1,5 × normal davor **und**
   danach gilt als Aussetzer (also schon ein fehlender Wert). Wechselnde Intervalle (Parametersatz, Alarm-Intervall)
   bleiben verbunden. Fehlerwerte (`NoReply` …) sind immer Lücken; einzelne Werte zwischen Lücken als Punkt
-- Markierungen: neuer Parametersatz (gestrichelt), Reset (Marke oben), Alarmgrenzen aus iparam
+- Markierungen: Reset (Marke oben), Alarmgrenzen aus iparam
 - Hinweise: Fehlerwerte, Alarmwerte, ungültige Loggerzeit, nicht lesbare Zeilen
 - hell/dunkel, Deutsch/Englisch
 

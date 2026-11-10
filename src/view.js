@@ -298,8 +298,8 @@ export function createViewer(el, opts = {}) {
         return u
     }
 
-    // Markierungen: neuer Parametersatz = senkrechte Linie (gestrichelt, dezent), Reset = kurze Marke oben;
-    // Alarmgrenzen = waagerechte Linie in Kanalfarbe
+    // Markierungen: Reset = kurze Marke oben; Alarmgrenzen = waagerechte Linie in Kanalfarbe
+    // (Linien fuer neue Parametersaetze bewusst nicht: wirkten unruhig, siehe Git-Historie)
     function drawMarks(u, chans, markers, tm) {
         const { ctx } = u
         const { left, top, width, height } = u.bbox
@@ -310,11 +310,10 @@ export function createViewer(el, opts = {}) {
             const px = Math.round(u.valToPos(m.t + tm.shift, 'x', true))
             if (px < left || px > left + width) continue
             ctx.strokeStyle = m.color
-            ctx.globalAlpha = m.tick ? 0.9 : 0.45
-            ctx.setLineDash(m.tick ? [] : [5 * dpr, 4 * dpr])
+            ctx.globalAlpha = 0.9
             ctx.beginPath()
             ctx.moveTo(px, top)
-            ctx.lineTo(px, m.tick ? top + 7 * dpr : top + height)
+            ctx.lineTo(px, top + 7 * dpr)
             ctx.stroke()
         }
         ctx.globalAlpha = 1
@@ -465,10 +464,8 @@ export function createViewer(el, opts = {}) {
         el.querySelector('.lv-tz select').addEventListener('change', ev => { st.time = ev.target.value; render() })
 
         const markers = []
-        const accent = cssVar('--lv-accent', '#0e7c89')
         const muted = cssVar('--lv-muted', '#8a8d91')
-        s.sets.slice(1).forEach(set => markers.push({ t: set.t0, color: accent }))
-        for (const e of s.events) if (e.tag.startsWith('RESET')) markers.push({ t: e.t, color: muted, tick: true })
+        for (const e of s.events) if (e.tag.startsWith('RESET')) markers.push({ t: e.t, color: muted })
 
         const xs = tm.shift ? s.x.map(v => v + tm.shift) : s.x
         const panels = el.querySelector('.lv-panels')
