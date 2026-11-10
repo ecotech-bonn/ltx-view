@@ -5,7 +5,7 @@
  *
  * Bedienung: Leiste oben = Diagramme ein/aus (sofort, Zoom bleibt), Kanalliste rechts am Diagramm = Kanal ein/aus,
  * Ziehen = Zeitbereich zoomen (alle Diagramme), Doppelklick = alles, Von/Bis = Zeitraum frei,
- * Werte am Cursor im schwebenden Feld (verschiebt das Layout nicht). Messpunkte als kleine Punkte auf der Kurve,
+ * Cursor rastet auf Messpunkte ein, Werte am Cursor im schwebenden Feld (verschiebt das Layout nicht). Messpunkte als kleine Punkte auf der Kurve,
  * sobald sie weit genug auseinander liegen (Zoom); einzelne Werte zwischen Luecken immer.
  */
 
@@ -173,11 +173,33 @@ export function createViewer(el, opts = {}) {
         return esc(unit) + (older.length ? ` <small>${esc(t.unitChanged)}: ${esc(older.join(', '))}</small>` : '')
     }
 
+    // ---------- Cursor rastet ein: naechster Zeitpunkt, an dem ein sichtbarer Kanal des Diagramms einen Messwert hat ----------
+    function hasValue(u, k) {
+        for (let i = 1; i < u.series.length; i++) if (u.series[i].show && typeof u.data[i][k] === 'number') return true
+        return false
+    }
+    function snapIdx(u, xv) {
+        const xd = u.data[0]
+        let lo = 0, hi = xd.length
+        while (lo < hi) { // erster Index mit xd >= xv
+            const m = (lo + hi) >> 1
+            if (xd[m] < xv) lo = m + 1
+            else hi = m
+        }
+        let l = lo - 1, r = lo
+        while (l >= 0 && !hasValue(u, l)) l--
+        while (r < xd.length && !hasValue(u, r)) r++
+        if (l < 0) return r < xd.length ? r : null
+        if (r >= xd.length) return l
+        return xv - xd[l] <= xd[r] - xv ? l : r
+    }
+
     // ---------- Werte am Cursor: schwebendes Feld im Diagramm (kein Einfluss auf das Layout) ----------
     function updateTip(u, tm, nf) {
         const tip = st.tips.get(u)
         if (!tip) return
-        const { left, top, idx } = u.cursor
+        const { left, top } = u.cursor
+        const idx = u.cursor.idxs?.[0] ?? u.cursor.idx
         if (st.hover !== u || idx == null || left == null || left < 0) {
             tip.hidden = true
             return
@@ -185,7 +207,7 @@ export function createViewer(el, opts = {}) {
         const rows = []
         for (let i = 1; i < u.series.length; i++) {
             if (!u.series[i].show) continue
-            const v = u.data[i][u.cursor.idxs?.[i] ?? idx]
+            const v = u.data[i][idx] // nur Werte genau an diesem Zeitpunkt
             if (v !== undefined) rows.push([i, v])
         }
         tip.innerHTML = `<div class="lv-tip-t">${esc(fmtTime(u.data[0][idx], tm))}</div>`
@@ -210,6 +232,7 @@ export function createViewer(el, opts = {}) {
         const grid = cssVar('--lv-grid', theme === 'dark' ? '#33373b' : '#e6e7e8')
         const names = { MMMM: t.months, MMM: t.months, WWWW: ['', '', '', '', '', '', ''], WWW: ['', '', '', '', '', '', ''] }
         const series = [{ label: t.timeZone }]
+        let snap = null // eingerasteter Index (Cursor-Linie auf Messpunkt)
         chans.forEach((c, i) => series.push({
             label: chanLabel(c),
             stroke: color(i),
@@ -225,7 +248,23 @@ export function createViewer(el, opts = {}) {
             width: mount.clientWidth || 600,
             height,
             fmtDate: tpl => uPlot.fmtDate(tpl, names),
-            cursor: { sync: { key: syncKey }, drag: { x: true, y: false } },
+            cursor: {
+                sync: { key: syncKey },
+                drag: { x: true, y: false },
+                // Senkrechte Linie auf den naechsten Messpunkt setzen (nur im Diagramm unter der Maus; die anderen
+                // bekommen ueber sync dieselbe Zeit)
+                move: (u, left, top) => {
+                    snap = null
+                    if (st.hover !== u || left == null || left < 0) return [left, top]
+                    snap = snapIdx(u, u.posToVal(left, 'x'))
+                    return snap == null ? [left, top] : [u.valToPos(u.data[0][snap], 'x'), top]
+                },
+                // Index je Kanal: genau der eingerastete Zeitpunkt; ohne Wert dort kein Cursor-Punkt
+                dataIdx: (u, si, ci) => {
+                    const k = snap ?? ci
+                    return si === 0 || typeof u.data[si][k] === 'number' ? k : null
+                },
+            },
             scales: { x: { time: true } },
             legend: { show: false }, // eigene Kanalliste rechts, Werte im schwebenden Feld
             series,
