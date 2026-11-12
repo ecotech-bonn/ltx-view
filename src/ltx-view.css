@@ -309,6 +309,43 @@
     font-weight: 600;
 }
 
+/* Darstellung Komplett / Nach Einheiten: zwei verbundene Knoepfe */
+.lv-seg {
+    display: inline-flex;
+    border: 1px solid var(--lv-border);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.lv-seg button {
+    font: inherit;
+    font-size: 0.9em;
+    color: var(--lv-muted);
+    background: transparent;
+    border: none;
+    padding: 0.28em 0.9em;
+    cursor: pointer;
+}
+
+.lv-seg button+button {
+    border-left: 1px solid var(--lv-border);
+}
+
+.lv-seg button:hover {
+    background: var(--lv-btn-hover);
+}
+
+.lv-seg button:focus-visible {
+    outline: 2px solid var(--lv-accent);
+    outline-offset: -2px;
+}
+
+.lv-seg button[aria-pressed="true"] {
+    color: var(--lv-fg);
+    font-weight: 600;
+    background: color-mix(in srgb, var(--lv-accent) 12%, var(--lv-panel));
+}
+
 /* ---------- Kanalliste rechts am Diagramm ---------- */
 .lv-legend {
     list-style: none;

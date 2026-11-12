@@ -8,7 +8,8 @@ Verwendet in **enviLog** (Bluetooth-App) und als eigenständige Seite, z. B. auf
 
 ## Funktionen
 
-- ein Diagramm je Einheit, Gerätewerte (Kanäle 90–99: Batterie, Innentemperatur …) getrennt
+- Messkanäle wahlweise ein Diagramm je Einheit oder alle in einem Diagramm (Komplett, eine y-Achse je Einheit);
+  Gerätewerte (Kanäle 90–99: Batterie, Innentemperatur …) getrennt
 - Leiste oben: Diagramme per Klick ein-/ausschalten, wirkt sofort (Zoom/Zeitraum bleibt); vorgewählt sind die
   Messwert-Diagramme
 - Kanalliste rechts neben jedem Diagramm (schmal/Handy: darunter): Kanal ein/aus, ab 4 Kanälen „Alle“/„Keine“
@@ -57,6 +58,8 @@ Optionen von `createViewer(el, opts)`:
 | `lang` | Browsersprache | `'de'` oder `'en'` |
 | `theme` | `'auto'` | `'light'`, `'dark'`; `'auto'` = `data-theme` am `<html>`, sonst Systemeinstellung |
 | `time` | `'logger'` bzw. `'local'` | `'logger'` (nur mit iparam), `'utc'`, `'local'` |
+| `layout` | `'unit'` | Messkanäle: `'unit'` = ein Diagramm je Einheit, `'all'` = alle in einem Diagramm (eine y-Achse je Einheit); im Viewer umschaltbar (ab 2 Einheiten) |
+| `onLayout` | – | Rückruf `(layout)` nach Umschalten durch den Benutzer, z. B. zum Merken |
 | `height`, `hkHeight` | `'auto'` | Diagrammhöhe in px oder `'auto'` (nach Fensterhöhe: Messwerte 300–560, Gerätewerte 200–320) |
 | `title` | – | Titel, falls weder iparam noch EDT einen Namen liefern |
 | `injectCss` | `true` | CSS selbst laden; `false`, wenn die Host-Seite `src/ltx-view.css` und `vendor/uplot/uPlot.min.css` einbindet |

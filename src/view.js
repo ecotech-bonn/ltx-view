@@ -1,4 +1,5 @@
-/* view.js - Viewer: Diagramme (uPlot) fuer EDT-Daten, ein Diagramm je Einheit, gemeinsame Zeitachse.
+/* view.js - Viewer: Diagramme (uPlot) fuer EDT-Daten, gemeinsame Zeitachse. Darstellung der Messkanaele waehlbar:
+ * ein Diagramm je Einheit ('unit') oder alle Messkanaele in einem Diagramm mit einer y-Achse je Einheit ('all').
  *
  *   const v = createViewer(element, { lang: 'de' })
  *   v.setData({ edt: text, iparam: text })          // iparam optional
@@ -21,6 +22,9 @@ const DAY = 86400
 const TIP_ROWS = 12 // max. Kanaele im Werte-Feld
 const PT_SIZE = 4 // Messpunkt (Durchmesser, px)
 const PT_SPACE = 6 // Messpunkte erst zeigen, wenn sie mind. so weit (px) auseinander liegen
+const ALL_KEY = 'all' // Gruppe 'alle Messkanaele' (Darstellung 'all'); andere Keys beginnen mit 'ch:'/'hk:'
+const AX_SIZE = 64 // Breite einer y-Achse (Zahlen)
+const AX_LABEL = 20 // zusaetzlich fuer die Einheit an der Achse (Darstellung 'all')
 
 let cssDone = false
 function injectCss() {
@@ -59,6 +63,8 @@ function durText(sec) {
  *   lang       'de' | 'en' (Standard: Browsersprache)
  *   theme      'auto' | 'light' | 'dark' ('auto': data-theme am <html>, sonst Systemeinstellung)
  *   time       'logger' | 'utc' | 'local' (Standard: 'logger', wenn der UTC-Versatz aus iparam bekannt ist, sonst 'local')
+ *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele in einem Diagramm)
+ *   onLayout   Rueckruf (layout) nach Umschalten durch den Benutzer, z. B. zum Merken
  *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560), hkHeight dito (200-320)
  *   injectCss  CSS automatisch laden (true)
  *   title      Titel, falls weder iparam noch EDT einen Namen liefern */
@@ -69,6 +75,7 @@ export function createViewer(el, opts = {}) {
         edt: null, ip: null, ipError: '', series: null, plots: [], tips: new Map(),
         syncing: false, building: false, hover: null,
         time: o.time ?? null,
+        layout: o.layout === 'all' ? 'all' : 'unit',
         on: new Set(), // Gruppen-Keys der angezeigten Diagramme
         off: new Map(), // Gruppen-Key -> Set ausgeblendeter Kanaele
         range: null, // gewaehlter Zeitraum in UTC-Sekunden { min, max } (bleibt bei Zeitzonen-Wechsel)
@@ -165,8 +172,23 @@ export function createViewer(el, opts = {}) {
         return s
     }
 
+    // Name eines Kanals in Liste/Werte-Feld; im Gesamtdiagramm mit Einheit
+    function seriesLabel(g, c) {
+        return g.all ? `${chanLabel(c)} · ${c.unit || t.noUnit}` : chanLabel(c)
+    }
+
+    // Diagramme der aktuellen Darstellung: 'all' fasst die Messkanaele (ab 2 Einheiten) zu einem Diagramm zusammen
+    function viewGroups(s) {
+        const meas = s.groups.filter(g => !g.hk)
+        if (st.layout !== 'all' || meas.length < 2) return s.groups
+        const channels = meas.flatMap(g => g.channels).sort((a, b) => a.ch - b.ch)
+        return [{ key: ALL_KEY, hk: false, all: true, unit: '', units: meas.map(g => g.unit), channels },
+            ...s.groups.filter(g => g.hk)]
+    }
+
     // Titel (HTML): Einheit bzw. HK-Name; fruehere Einheiten der Kanaele (anderer Parametersatz) gedimmt
     function groupTitle(g) {
+        if (g.all) return esc(`${t.allChannels} · ${g.units.map(u => u || t.noUnit).join(', ')}`)
         const unit = g.unit || t.noUnit
         if (g.hk) return esc(`${g.channels.map(chanLabel).join(', ')} · ${unit}`)
         const older = [...new Set(g.channels.flatMap(c => c.units))].filter(u => u !== g.unit).map(u => u || t.noUnit)
@@ -224,7 +246,35 @@ export function createViewer(el, opts = {}) {
         tip.style.transform = `translate(${Math.max(0, Math.round(x))}px, ${Math.max(0, Math.round(y))}px)`
     }
 
-    function makePlot(g, xs, mount, tm, markers, theme, onRange, height) {
+    // y-Achsen: Darstellung 'unit' eine links; 'all' eine je Einheit, abwechselnd links/rechts, mit Einheit.
+    // pad: { left, right } (px) = Achsenbreite des Gesamtdiagramms; andere Diagramme bekommen leere Achsen dazu,
+    // damit die Zeitachsen aller Diagramme untereinander stehen.
+    const unitsOf = g => [...new Set(g.channels.map(c => c.unit))]
+    function yAxes(g, fg, grid, nf, pad) {
+        const values = (u, splits) => splits.map(v => v == null ? '' : nf.format(v))
+        const empty = (side, size) => ({ scale: 'y', side, size, stroke: 'transparent', grid: { show: false },
+            ticks: { show: false }, values: (u, splits) => splits.map(() => '') })
+        if (!g.all) {
+            const axes = [{ stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: AX_SIZE, values }]
+            if (pad && pad.left > AX_SIZE) axes.push(empty(3, pad.left - AX_SIZE))
+            if (pad && pad.right > 0) axes.push(empty(1, pad.right))
+            return axes
+        }
+        return unitsOf(g).map((unit, k) => ({
+            scale: 'u:' + unit, side: k % 2 ? 1 : 3, stroke: fg, size: AX_SIZE,
+            label: unit || t.noUnit, labelSize: AX_LABEL, labelGap: 0, labelFont: '600 12px system-ui, sans-serif',
+            grid: { show: k === 0, stroke: grid, width: 1 }, ticks: { stroke: grid }, values,
+        }))
+    }
+    function axesPad(groups) {
+        const g = groups.find(x => x.all)
+        if (!g) return null
+        const n = unitsOf(g).length
+        const w = AX_SIZE + AX_LABEL
+        return { left: Math.ceil(n / 2) * w, right: Math.floor(n / 2) * w }
+    }
+
+    function makePlot(g, xs, mount, tm, markers, theme, onRange, height, pad) {
         const chans = g.channels
         const off = st.off.get(g.key)
         const nf = new Intl.NumberFormat(locale, { maximumFractionDigits: 6 })
@@ -234,7 +284,8 @@ export function createViewer(el, opts = {}) {
         const series = [{ label: t.timeZone }]
         let snap = null // eingerasteter Index (Cursor-Linie auf Messpunkt)
         chans.forEach((c, i) => series.push({
-            label: chanLabel(c),
+            label: seriesLabel(g, c),
+            ...(g.all ? { scale: 'u:' + c.unit } : {}),
             stroke: color(i),
             width: 1.5,
             spanGaps: false,
@@ -265,13 +316,12 @@ export function createViewer(el, opts = {}) {
                     return si === 0 || typeof u.data[si][k] === 'number' ? k : null
                 },
             },
-            scales: { x: { time: true } },
+            scales: { x: { time: true }, ...(g.all ? Object.fromEntries(unitsOf(g).map(un => ['u:' + un, {}])) : {}) },
             legend: { show: false }, // eigene Kanalliste rechts, Werte im schwebenden Feld
             series,
             axes: [
                 { stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, values: axisStamps(), size: 46 },
-                { stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: 64,
-                    values: (u, splits) => splits.map(v => v == null ? '' : nf.format(v)) },
+                ...yAxes(g, fg, grid, nf, pad),
             ],
             hooks: {
                 setScale: [(u, key) => {
@@ -322,7 +372,7 @@ export function createViewer(el, opts = {}) {
             if (!u.series[i + 1].show) return
             for (const lim of [c.alarmHi, c.alarmLo]) {
                 if (lim == null) continue
-                const py = Math.round(u.valToPos(lim, 'y', true))
+                const py = Math.round(u.valToPos(lim, u.series[i + 1].scale ?? 'y', true))
                 if (py < top || py > top + height) continue
                 ctx.strokeStyle = color(i)
                 ctx.beginPath()
@@ -363,7 +413,7 @@ export function createViewer(el, opts = {}) {
     // ---------- Diagramme ----------
     // Knopf je Diagramm in der Auswahl-Leiste (ein/aus)
     function chipHtml(g) {
-        const label = g.hk ? g.channels.map(chanLabel).join(', ') : (g.unit || t.noUnit)
+        const label = g.all ? t.allChannels : g.hk ? g.channels.map(chanLabel).join(', ') : (g.unit || t.noUnit)
         const info = g.hk ? (g.unit || t.noUnit) : t.nChannels(g.channels.length)
         const values = new Intl.NumberFormat(locale).format(g.channels.reduce((n, c) => n + c.count, 0))
         return `<button type="button" class="lv-chip" data-key="${esc(g.key)}" aria-pressed="${st.on.has(g.key)}"`
@@ -375,7 +425,7 @@ export function createViewer(el, opts = {}) {
     function legendHtml(g) {
         const off = st.off.get(g.key)
         let html = g.channels.map((c, i) => `<li><button type="button" data-i="${i + 1}" aria-pressed="${!off.has(c.ch)}">`
-            + `<i style="background:${color(i)}"></i><span>${esc(chanLabel(c))}</span></button></li>`).join('')
+            + `<i style="background:${color(i)}"></i><span>${esc(seriesLabel(g, c))}</span></button></li>`).join('')
         if (g.channels.length > 3) {
             html = `<li class="lv-leg-all"><button type="button" data-all="1">${esc(t.selAll)}</button>`
                 + `<button type="button" data-all="0">${esc(t.selNone)}</button></li>` + html
@@ -410,14 +460,21 @@ export function createViewer(el, opts = {}) {
         timeOpts.push(['utc', t.utc], ['local', t.localTime])
         const ranges = [30, 7, 1].filter(d => d * DAY < span)
 
+        const groups = viewGroups(s)
+        const pad = axesPad(groups)
         let selHtml = ''
         if (s.groups.length > 1) {
             const row = hk => {
-                const gs = s.groups.filter(g => g.hk === hk)
+                const gs = groups.filter(g => g.hk === hk)
                 return gs.length ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(hk ? t.device : t.measurements)}</span>`
                     + gs.map(chipHtml).join('') + `</div>` : ''
             }
-            selHtml = `<div class="lv-sel" role="group" aria-label="${esc(t.charts)}">${row(false)}${row(true)}</div>`
+            // Darstellung der Messkanaele nur mit mehreren Einheiten waehlbar
+            const seg = (v, l) => `<button type="button" data-layout="${v}" aria-pressed="${st.layout === v}">${esc(l)}</button>`
+            const layoutRow = s.groups.filter(g => !g.hk).length > 1
+                ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(t.layout)}</span><div class="lv-seg" role="group"`
+                    + ` aria-label="${esc(t.layout)}">${seg('all', t.layoutAll)}${seg('unit', t.layoutUnit)}</div></div>` : ''
+            selHtml = `<div class="lv-sel" role="group" aria-label="${esc(t.charts)}">${layoutRow}${row(false)}${row(true)}</div>`
         }
 
         el.innerHTML = headHtml(s, tm) + selHtml + `<div class="lv-bar">
@@ -477,7 +534,7 @@ export function createViewer(el, opts = {}) {
             let lastHk = null
             st.building = true
             const built = []
-            for (const g of s.groups) {
+            for (const g of groups) {
                 if (!st.on.has(g.key)) continue
                 if (g.hk !== lastHk) {
                     const h = document.createElement('h3')
@@ -505,7 +562,8 @@ export function createViewer(el, opts = {}) {
             }
             if (legW) panels.style.setProperty('--lv-legw', Math.ceil(legW) + 'px')
             for (const { g, sec, height } of built) {
-                const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height)
+                const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height,
+                    pad && !g.all && st.on.has(ALL_KEY) ? pad : null)
                 st.plots.push(u)
                 bindLegend(sec.querySelector('.lv-legend'), u, g)
             }
@@ -517,6 +575,12 @@ export function createViewer(el, opts = {}) {
             lastWidth = el.clientWidth
         }
 
+        el.querySelectorAll('.lv-seg [data-layout]').forEach(b => b.addEventListener('click', () => {
+            if (st.layout === b.dataset.layout) return
+            st.layout = b.dataset.layout
+            o.onLayout?.(st.layout)
+            render() // Zeitraum (st.range) bleibt
+        }))
         el.querySelectorAll('.lv-chip').forEach(b => b.addEventListener('click', () => {
             const key = b.dataset.key
             const on = !st.on.has(key)
@@ -562,7 +626,9 @@ export function createViewer(el, opts = {}) {
             const groups = st.series.groups
             const meas = groups.filter(g => !g.hk)
             st.on = new Set((meas.length ? meas : groups).map(g => g.key))
+            if (meas.length) st.on.add(ALL_KEY)
             st.off = new Map(groups.map(g => [g.key, new Set()]))
+            st.off.set(ALL_KEY, new Set())
             st.range = null
             render()
             return st.series
@@ -595,10 +661,11 @@ export function createViewer(el, opts = {}) {
             if (edt === null) throw new Error('no EDT file')
             return api.setData({ edt, iparam, title })
         },
-        /* Optionen aendern (lang, theme, time, height, hkHeight) und neu zeichnen */
+        /* Optionen aendern (lang, theme, time, layout, height, hkHeight) und neu zeichnen */
         setOptions(n = {}) {
             Object.assign(o, n)
             if (n.time !== undefined) st.time = n.time
+            if (n.layout !== undefined) st.layout = n.layout === 'all' ? 'all' : 'unit'
             render()
         },
         refresh: () => render(),
@@ -610,6 +677,7 @@ export function createViewer(el, opts = {}) {
             el.classList.remove('lv')
         },
         get series() { return st.series },
+        get layout() { return st.layout },
     }
     return api
 }

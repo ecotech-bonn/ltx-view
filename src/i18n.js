@@ -4,6 +4,10 @@ const TEXT = {
     en: {
         all: 'All',
         charts: 'Charts',
+        layout: 'Display',
+        layoutAll: 'Combined',
+        layoutUnit: 'By unit',
+        allChannels: 'All channels',
         noChart: 'No chart selected. Switch charts on in the bar above.',
         selAll: 'All',
         selNone: 'None',
@@ -42,6 +46,10 @@ const TEXT = {
     de: {
         all: 'Alles',
         charts: 'Diagramme',
+        layout: 'Darstellung',
+        layoutAll: 'Komplett',
+        layoutUnit: 'Nach Einheiten',
+        allChannels: 'Alle Messkanäle',
         noChart: 'Kein Diagramm gewählt. Diagramme in der Leiste oben einschalten.',
         selAll: 'Alle',
         selNone: 'Keine',
