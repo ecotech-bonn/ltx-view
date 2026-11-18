@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseEdt, parseValue } from '../src/edt.js'
 import { parseIparam } from '../src/iparam.js'
-import { buildSeries } from '../src/series.js'
+import { buildSeries, niceRange, findGaps } from '../src/series.js'
 
 const EX1 = `<NEW>
 <NT AUTO OK(6)>
@@ -130,4 +130,33 @@ test('gaps: normal interval detected locally, interval change stays connected', 
     // leichtes Zittern (+-20 %) bleibt verbunden
     const d = seq(0, 600, 30).map((v, i) => v + (i % 3 - 1) * 60)
     assert.deepEqual(findGaps(d), [])
+})
+
+test('niceRange: usually from 0, not for negative or high values', () => {
+    assert.deepEqual(niceRange(15, 25), [0, 30]) // Temperatur: ab 0
+    assert.deepEqual(niceRange(0.2, 9.7), [0, 10])
+    assert.deepEqual(niceRange(1000, 1010), [998, 1012]) // Luftdruck: nicht ab 0
+    assert.deepEqual(niceRange(-5, 20), [-10, 25]) // negative Werte
+    assert.deepEqual(niceRange(-30, -25), [-31, -24])
+    assert.deepEqual(niceRange(-30, -5), [-40, 0]) // nur negativ: bis 0
+    assert.deepEqual(niceRange(0, 0), [0, 1])
+    assert.deepEqual(niceRange(5, 5), [4, 6])
+    assert.equal(niceRange(null, null), null)
+    for (const [lo, hi] of [[0.0012, 0.0019], [3.6, 4.2], [12345, 67890], [-0.5, 0.5]]) {
+        const [a, b] = niceRange(lo, hi)
+        assert.ok(a <= lo && b >= hi && a < b, `${lo}..${hi} -> ${a}..${b}`)
+    }
+})
+
+test('series: few values far apart are not joined (fallback: typical row interval)', () => {
+    // Kanal 1 nur zweimal, 10 Tage auseinander; Kanal 0 durchgehend alle 10 min
+    let edt = '!U 0:m 1:m\n!1700000000 0:1 1:5\n'
+    for (let i = 1; i < 50; i++) edt += '!+600 0:1\n'
+    edt += `!${1700000000 + 10 * 86400} 0:1 1:6\n`
+    const s = buildSeries(parseEdt(edt))
+    const c1 = s.channels.find(c => c.ch === 1)
+    assert.equal(c1.gaps, 1)
+    assert.ok(c1.data.includes(null))
+    assert.deepEqual(findGaps([0, 600, 1200], 1.5, 600), [])
+    assert.deepEqual(findGaps([0, 600, 1200], 1.5, 0), [])
 })

@@ -1,7 +1,7 @@
 /* view.js - Viewer: Diagramme (uPlot) fuer EDT-Daten, gemeinsame Zeitachse. Darstellung der Messkanaele waehlbar:
  * ein Diagramm je Einheit ('unit') oder alle Messkanaele kombiniert in einem Diagramm ('all') mit EINER gemeinsamen
- * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Deren Bereich ist
- * automatisch oder per y min / y max fest vorgegeben.
+ * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Deren Bereich steht
+ * als Zahlen in y min / y max (aenderbar; "auto" berechnet runde Grenzen aus den sichtbaren Werten, meist ab 0).
  *
  *   const v = createViewer(element, { lang: 'de' })
  *   v.setData({ edt: text, iparam: text })          // iparam optional
@@ -15,7 +15,7 @@
 import uPlot from '../vendor/uplot/uPlot.esm.js'
 import { parseEdt, stripBom } from './edt.js'
 import { parseIparam } from './iparam.js'
-import { buildSeries } from './series.js'
+import { buildSeries, niceRange } from './series.js'
 import { texts } from './i18n.js'
 
 const PALETTE = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#17becf', '#bcbd22', '#7f7f7f']
@@ -28,18 +28,71 @@ const ALL_KEY = 'all' // Gruppe 'alle Messkanaele' (Darstellung 'all'); andere K
 const AX_SIZE = 64 // Breite der y-Achse (Zahlen), in allen Diagrammen gleich -> Zeitachsen stehen untereinander
 const Y_PAD = 0.1 // automatischer y-Bereich: Rand ober-/unterhalb der Werte (Anteil, wie uPlot)
 
-let cssDone = false
+/* Linie einer Reihe fuer uPlot (series.paths). An Luecken (null) wird die Linie abgesetzt; undefined (Kanal hat zu
+ * diesem Zeitpunkt keinen Eintrag) wird uebersprungen, die Linie also verbunden.
+ * Warum eigen: uPlot zieht die Linie durch die Luecke und schneidet sie per Clip-Rechteck zwischen den Werten davor
+ * und danach aus. Die Linie hat aber eine Breite: bei schmalen Luecken mit Sprung (herausgezoomt) bleibt am Rand ein
+ * duenner senkrechter Strich stehen - eine angedeutete Linie, wo keine ist.
+ * Viele Werte je Pixelspalte: nur Min/Max der Spalte zeichnen (wie uPlot). Koordinaten auf ganze Pixel gerundet
+ * (uPlot verschiebt die Zeichnung selbst um die halbe Linienbreite). */
+function gapPaths(u, si, i0, i1) {
+    const xs = u.data[0], ys = u.data[si]
+    const stroke = new Path2D()
+    let pen = false // Linie laeuft (letzter Eintrag war ein Wert, keine Luecke)
+    let colX = null, lo = 0, hi = 0, last = 0 // aktuelle Pixelspalte: Min, Max, letzter Wert
+    const flush = () => {
+        if (colX != null && lo !== hi) {
+            stroke.lineTo(colX, lo)
+            stroke.lineTo(colX, hi)
+            stroke.lineTo(colX, last)
+        }
+        colX = null
+    }
+    for (let i = i0; i <= i1; i++) {
+        const v = ys[i]
+        if (v === undefined) continue
+        if (v === null) {
+            flush()
+            pen = false
+            continue
+        }
+        const x = Math.round(u.valToPos(xs[i], 'x', true))
+        const y = Math.round(u.valToPos(v, 'y', true))
+        if (pen && x === colX) {
+            if (y < lo) lo = y
+            if (y > hi) hi = y
+            last = y
+            continue
+        }
+        flush()
+        if (pen) stroke.lineTo(x, y)
+        else stroke.moveTo(x, y)
+        pen = true
+        colX = x
+        lo = hi = last = y
+    }
+    flush()
+    return { stroke, fill: null, clip: null, band: null, gaps: null, flags: 0 }
+}
+
+// Stylesheets einmal je Seite einbinden -> Promise, erfuellt wenn geladen (oder fehlgeschlagen)
+let cssReady = null, cssLoaded = false
 function injectCss() {
-    if (cssDone || typeof document === 'undefined') return
-    cssDone = true
+    if (cssReady) return cssReady
+    if (typeof document === 'undefined') return (cssReady = Promise.resolve())
+    const wait = []
     for (const rel of ['../vendor/uplot/uPlot.min.css', './ltx-view.css']) {
         const href = new URL(rel, import.meta.url).href
         if (document.querySelector(`link[href="${href}"]`)) continue
         const l = document.createElement('link')
         l.rel = 'stylesheet'
         l.href = href
+        wait.push(new Promise(r => { l.addEventListener('load', r); l.addEventListener('error', r) }))
         document.head.appendChild(l)
     }
+    if (!wait.length) cssLoaded = true // schon eingebunden (z. B. von der Seite selbst)
+    cssReady = Promise.all(wait).then(() => { cssLoaded = true })
+    return cssReady
 }
 
 function esc(s) {
@@ -66,14 +119,21 @@ function durText(sec) {
  *   theme      'auto' | 'light' | 'dark' ('auto': data-theme am <html>, sonst Systemeinstellung)
  *   time       'logger' | 'utc' | 'local' (Standard: 'logger', wenn der UTC-Versatz aus iparam bekannt ist, sonst 'local')
  *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele kombiniert, eine y-Achse)
- *   yMin, yMax fester y-Bereich im kombinierten Diagramm (Standard: automatisch); im Viewer aenderbar
+ *   yMin, yMax y-Bereich im kombinierten Diagramm (Standard: aus den Daten, meist ab 0); im Viewer aenderbar
  *   onLayout   Rueckruf (layout) nach Umschalten durch den Benutzer, z. B. zum Merken
  *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560), hkHeight dito (200-320)
  *   injectCss  CSS automatisch laden (true)
  *   title      Titel, falls weder iparam noch EDT einen Namen liefern */
 export function createViewer(el, opts = {}) {
     const o = { theme: 'auto', height: 'auto', hkHeight: 'auto', injectCss: true, ...opts }
+    // Solange das CSS laedt, stimmen die Breiten nicht (Kanalliste, Diagrammflaeche): wurde schon gezeichnet, danach
+    // neu aufbauen. Sonst ist beim ersten Oeffnen das Diagramm zu breit und rechts unter der Kanalliste abgeschnitten
     if (o.injectCss) injectCss()
+    let cssWait = !!o.injectCss && !cssLoaded, drawnEarly = false, dead = false
+    if (cssWait) cssReady.then(() => {
+        cssWait = false
+        if (drawnEarly && !dead && st.series) render()
+    })
     const st = {
         edt: null, ip: null, ipError: '', series: null, plots: [], tips: new Map(),
         syncing: false, building: false, hover: null,
@@ -100,12 +160,13 @@ export function createViewer(el, opts = {}) {
     const mql = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null
     const onScheme = () => { if (o.theme === 'auto') api.refresh() }
     mql?.addEventListener?.('change', onScheme)
-    let lastWidth = 0
+    // Diagrammbreite folgt der eigenen Flaeche (.lv-plot, wird je Diagramm beobachtet), nicht nur dem Container:
+    // die Flaeche aendert sich auch durch die Kanalliste daneben oder CSS, das spaeter wirkt
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-        const w = el.clientWidth
-        if (w === lastWidth) return
-        lastWidth = w
-        for (const p of st.plots) p.setSize({ width: p.root.parentElement.clientWidth, height: p.height })
+        for (const p of st.plots) {
+            const w = p.root.parentElement?.clientWidth
+            if (w && w !== p.width) p.setSize({ width: w, height: p.height })
+        }
     }) : null
     ro?.observe(el)
 
@@ -171,7 +232,10 @@ export function createViewer(el, opts = {}) {
     }
 
     function destroyPlots() {
-        for (const p of st.plots) p.destroy()
+        for (const p of st.plots) {
+            if (p.root.parentElement) ro?.unobserve(p.root.parentElement)
+            p.destroy()
+        }
         st.plots = []
         st.tips.clear()
         st.hover = null
@@ -265,7 +329,8 @@ export function createViewer(el, opts = {}) {
             values: (u, splits) => splits.map(v => v == null ? '' : nf.format(v)) }]
     }
 
-    // y-Bereich des kombinierten Diagramms: feste Grenzen aus st.yRange, fehlende automatisch aus den sichtbaren Werten
+    // y-Bereich des kombinierten Diagramms: feste Grenzen aus st.yRange (Normalfall, die Felder zeigen immer Zahlen);
+    // nur ohne sichtbare Werte bleibt ein Feld leer, dann automatisch
     function yRangeAll(u, dmin, dmax) {
         const { min, max } = st.yRange
         if (min != null && max != null) return [min, max]
@@ -289,6 +354,7 @@ export function createViewer(el, opts = {}) {
             stroke: color(i),
             width: 1.5,
             spanGaps: false,
+            paths: gapPaths,
             show: !off.has(c.ch),
             // Messpunkte, sobald sie mind. PT_SPACE px auseinander liegen (uPlot-Regel), Einzelwerte zwischen
             // Luecken immer
@@ -452,13 +518,36 @@ export function createViewer(el, opts = {}) {
         }))
     }
 
-    // Felder y min / y max am kombinierten Diagramm (leer = automatisch)
+    // Felder y min / y max am kombinierten Diagramm. Sie zeigen immer die Zahlen des aktuellen Bereichs; 'auto' und
+    // leere Felder werden aus den sichtbaren Werten berechnet und eingetragen (Werte setzt bindYRange)
     function yRangeHtml() {
-        const nf = new Intl.NumberFormat(locale, { useGrouping: false, maximumFractionDigits: 6 })
         const inp = (k, l) => `<label>${esc(l)} <input type="text" inputmode="decimal" data-y="${k}" placeholder="${esc(t.auto)}"`
-            + ` value="${st.yRange[k] == null ? '' : esc(nf.format(st.yRange[k]))}" autocomplete="off" spellcheck="false"></label>`
+            + ` autocomplete="off" spellcheck="false"></label>`
         return `<div class="lv-yr" role="group" aria-label="${esc(t.yRange)}" title="${esc(t.yRangeTip)}">`
-            + `${inp('min', t.yMin)}${inp('max', t.yMax)}<button type="button" data-y="auto">${esc(t.auto)}</button></div>`
+            + `${inp('min', t.yMin)}${inp('max', t.yMax)}<button type="button" data-y="auto" title="${esc(t.autoTip)}">${esc(t.auto)}</button></div>`
+    }
+
+    // Runder Bereich (niceRange) ueber die sichtbaren Kanaele; full: ganze Daten, sonst nur der gezeigte Zeitraum
+    function autoRange(u, full) {
+        const xd = u.data[0]
+        let i0 = 0, i1 = xd.length - 1
+        if (!full && u.scales.x.min != null) {
+            const { min, max } = u.scales.x
+            while (i0 <= i1 && xd[i0] < min) i0++
+            while (i1 >= i0 && xd[i1] > max) i1--
+        }
+        let lo = Infinity, hi = -Infinity
+        for (let si = 1; si < u.series.length; si++) {
+            if (!u.series[si].show) continue
+            const d = u.data[si]
+            for (let i = i0; i <= i1; i++) {
+                const v = d[i]
+                if (typeof v !== 'number') continue
+                if (v < lo) lo = v
+                if (v > hi) hi = v
+            }
+        }
+        return lo <= hi ? niceRange(lo, hi) : null
     }
 
     // Eingabe (Komma oder Punkt) -> Zahl, leer -> null, ungueltig -> NaN. Stehen beide Zeichen drin, ist das
@@ -472,26 +561,39 @@ export function createViewer(el, opts = {}) {
         return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(x) ? Number(x) : NaN
     }
 
+    // vals: [min, max] (Zahl, null = berechnen, NaN = ungueltig); full: Berechnung ueber die ganzen Daten
     function bindYRange(box, u) {
         const ins = [...box.querySelectorAll('input[data-y]')]
-        const apply = () => {
-            const [a, b] = ins.map(i => parseNum(i.value))
+        const nf = new Intl.NumberFormat(locale, { useGrouping: false, maximumFractionDigits: 6 })
+        const apply = (vals, full = false) => {
+            let [a, b] = vals
             const bad = Number.isNaN(a) || Number.isNaN(b) || (a != null && b != null && a >= b)
             for (const i of ins) i.classList.toggle('lv-bad', bad)
             if (bad) return
+            if (a == null || b == null) {
+                const r = autoRange(u, full)
+                if (r) {
+                    // eine Grenze vorgegeben, die andere berechnet: muss dazu passen, sonst Abstand wie yRangeAll
+                    if (a == null && b == null) [a, b] = r
+                    else if (a == null) a = r[0] < b ? r[0] : b - (Math.abs(b) || 1)
+                    else b = r[1] > a ? r[1] : a + (Math.abs(a) || 1)
+                }
+            }
             st.yRange = { min: a, max: b }
-            // min/max null = neu automatisch skalieren, dabei bestimmt yRangeAll den Bereich. (Feste Zahlen hier
-            // wuerden uPlot genau diesen Bereich setzen lassen, ohne yRangeAll aufzurufen.)
+            for (const i of ins) i.value = st.yRange[i.dataset.y] == null ? '' : nf.format(st.yRange[i.dataset.y])
+            // min/max null = neu skalieren, dabei bestimmt yRangeAll den Bereich. (Feste Zahlen hier wuerden uPlot
+            // genau diesen Bereich setzen lassen, ohne yRangeAll aufzurufen.)
             u.setScale('y', { min: null, max: null })
         }
+        const fromInputs = () => apply(ins.map(i => parseNum(i.value)))
         ins.forEach(i => {
-            i.addEventListener('change', apply)
-            i.addEventListener('keydown', ev => { if (ev.key === 'Enter') apply() })
+            i.addEventListener('change', fromInputs)
+            i.addEventListener('keydown', ev => { if (ev.key === 'Enter') fromInputs() })
         })
-        box.querySelector('button[data-y="auto"]').addEventListener('click', () => {
-            for (const i of ins) i.value = ''
-            apply()
-        })
+        // auto: Bereich aus den sichtbaren Kanaelen im gezeigten Zeitraum
+        box.querySelector('button[data-y="auto"]').addEventListener('click', () => apply([null, null]))
+        // Start: vorgegebene Grenzen (Optionen oder vorherige Eingabe), fehlende aus den ganzen Daten berechnen
+        apply([st.yRange.min, st.yRange.max], true)
     }
 
     function renderCharts(s, tm, theme) {
@@ -604,8 +706,10 @@ export function createViewer(el, opts = {}) {
             }
             if (legW) panels.style.setProperty('--lv-legw', Math.ceil(legW) + 'px')
             for (const { g, sec, height } of built) {
-                const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height)
+                const mount = sec.querySelector('.lv-plot')
+                const u = makePlot(g, xs, mount, tm, markers, theme, onRange, height)
                 st.plots.push(u)
+                ro?.observe(mount)
                 bindLegend(sec.querySelector('.lv-legend'), u, g)
                 if (g.all) bindYRange(sec.querySelector('.lv-yr'), u)
             }
@@ -614,7 +718,6 @@ export function createViewer(el, opts = {}) {
             const r = st.range
             if (r) setX(r.min + tm.shift, r.max + tm.shift)
             else onRange(x0, x1)
-            lastWidth = el.clientWidth
         }
 
         el.querySelectorAll('.lv-seg [data-layout]').forEach(b => b.addEventListener('click', () => {
@@ -635,6 +738,7 @@ export function createViewer(el, opts = {}) {
     }
 
     function render() {
+        if (cssWait) drawnEarly = true
         destroyPlots()
         t = texts(o.lang)
         locale = t === texts('de') ? 'de-DE' : 'en-GB'
@@ -714,6 +818,7 @@ export function createViewer(el, opts = {}) {
         },
         refresh: () => render(),
         destroy() {
+            dead = true
             destroyPlots()
             ro?.disconnect()
             mql?.removeEventListener?.('change', onScheme)

@@ -8,7 +8,7 @@ Verwendet in **enviLog** (Bluetooth-App) und als eigenständige Seite, z. B. auf
 
 ## Funktionen
 
-- Messkanäle wahlweise ein Diagramm je Einheit oder alle in einem Diagramm (Kombiniert: eine gemeinsame y-Achse ohne Trennung nach Einheiten, auch bei bis zu 90 Kanälen; Wertebereich automatisch oder per y min / y max fest);
+- Messkanäle wahlweise ein Diagramm je Einheit oder alle in einem Diagramm (Kombiniert: eine gemeinsame y-Achse ohne Trennung nach Einheiten, auch bei bis zu 90 Kanälen; Wertebereich in y min / y max, „auto“ trägt runde Grenzen aus den sichtbaren Werten ein, meist ab 0);
   Gerätewerte (Kanäle 90–99: Batterie, Innentemperatur …) getrennt
 - Leiste oben: Diagramme per Klick ein-/ausschalten, wirkt sofort (Zoom/Zeitraum bleibt); vorgewählt sind die
   Messwert-Diagramme
@@ -59,7 +59,7 @@ Optionen von `createViewer(el, opts)`:
 | `theme` | `'auto'` | `'light'`, `'dark'`; `'auto'` = `data-theme` am `<html>`, sonst Systemeinstellung |
 | `time` | `'logger'` bzw. `'local'` | `'logger'` (nur mit iparam), `'utc'`, `'local'` |
 | `layout` | `'unit'` | Messkanäle: `'unit'` = ein Diagramm je Einheit, `'all'` = alle kombiniert in einem Diagramm (eine gemeinsame y-Achse); im Viewer umschaltbar (ab 2 Einheiten) |
-| `yMin`, `yMax` | – | fester y-Bereich im kombinierten Diagramm (fehlt = automatisch); im Viewer änderbar, `viewer.yRange` liefert den aktuellen |
+| `yMin`, `yMax` | – | y-Bereich im kombinierten Diagramm (fehlt = aus den Daten berechnet, meist ab 0); im Viewer änderbar, `viewer.yRange` liefert den aktuellen |
 | `onLayout` | – | Rückruf `(layout)` nach Umschalten durch den Benutzer, z. B. zum Merken |
 | `height`, `hkHeight` | `'auto'` | Diagrammhöhe in px oder `'auto'` (nach Fensterhöhe: Messwerte 300–560, Gerätewerte 200–320) |
 | `title` | – | Titel, falls weder iparam noch EDT einen Namen liefern |
