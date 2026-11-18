@@ -131,6 +131,21 @@
     min-width: 0;
 }
 
+/* Diagramme eines Bereichs (Messwerte / Geraetewerte): untereinander ... */
+.lv-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+    min-width: 0;
+}
+
+/* ... oder als Kacheln: so viele Spalten, wie mit Mindestbreite --lv-tile-min passen (schmal: eine); Kacheln einer
+   Zeile gleich hoch. Kanalliste unter dem Diagramm -> Zeitachsen einer Spalte stehen untereinander */
+.lv-group.lv-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--lv-tile-min, 30em)), 1fr));
+}
+
 .lv-section {
     font-size: 0.8em;
     font-weight: 650;
@@ -242,6 +257,10 @@
     .lv-body {
         grid-template-columns: minmax(0, 1fr);
     }
+}
+
+.lv-tiles .lv-body {
+    grid-template-columns: minmax(0, 1fr);
 }
 
 /* uPlot an das Thema anpassen */
@@ -410,6 +429,11 @@
     background: color-mix(in srgb, var(--lv-accent) 12%, var(--lv-panel));
 }
 
+/* Kombiniert / Nach Einheiten und Untereinander / Kacheln in einer Zeile: etwas Abstand */
+.lv-seg+.lv-seg {
+    margin-left: 0.5em;
+}
+
 /* ---------- Kanalliste rechts am Diagramm ---------- */
 .lv-legend {
     list-style: none;
@@ -489,6 +513,7 @@
     color: var(--lv-accent);
 }
 
+/* Kanalliste unter dem Diagramm: schmales Diagramm (Handy) oder Kachel */
 @container (max-width: 520px) {
     .lv-legend {
         flex-direction: row;
@@ -504,6 +529,21 @@
     .lv-leg-all {
         flex-basis: 100%;
     }
+}
+
+.lv-tiles .lv-legend {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-width: none;
+    max-height: 7.5em;
+}
+
+.lv-tiles .lv-legend li {
+    flex: 0 1 auto;
+}
+
+.lv-tiles .lv-leg-all {
+    flex-basis: 100%;
 }
 
 /* ---------- Werte am Cursor (schwebend, ohne Einfluss auf das Layout) ---------- */

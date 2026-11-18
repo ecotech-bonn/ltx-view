@@ -2,7 +2,8 @@
  * ein Diagramm je Einheit ('unit') oder alle Messkanaele kombiniert in einem Diagramm ('all') mit EINER gemeinsamen
  * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Der y-Bereich jedes
  * Diagramms steht als Zahlen in y min / y max im Diagrammkopf (aenderbar; "auto" berechnet runde Grenzen aus den
- * sichtbaren Werten, meist ab 0).
+ * sichtbaren Werten, meist ab 0). Anordnung waehlbar: untereinander oder als Kacheln nebeneinander (je Bereich
+ * Messwerte / Geraetewerte ein Raster, Spaltenzahl nach Breite).
  *
  *   const v = createViewer(element, { lang: 'de' })
  *   v.setData({ edt: text, iparam: text })          // iparam optional
@@ -123,7 +124,10 @@ function durText(sec) {
  *   yMin, yMax y-Bereich im kombinierten Diagramm (Standard: aus den Daten, meist ab 0); im Viewer aenderbar wie
  *              der Bereich jedes anderen Diagramms
  *   onLayout   Rueckruf (layout) nach Umschalten durch den Benutzer, z. B. zum Merken
- *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560), hkHeight dito (200-320)
+ *   tiles      true: Diagramme als Kacheln nebeneinander (Standard false: untereinander)
+ *   onTiles    Rueckruf (tiles) nach Umschalten durch den Benutzer
+ *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560, als Kachel 220-400),
+ *              hkHeight dito (200-320, als Kachel 180-280)
  *   injectCss  CSS automatisch laden (true)
  *   title      Titel, falls weder iparam noch EDT einen Namen liefern */
 export function createViewer(el, opts = {}) {
@@ -141,6 +145,7 @@ export function createViewer(el, opts = {}) {
         syncing: false, building: false, hover: null,
         time: o.time ?? null,
         layout: o.layout === 'all' ? 'all' : 'unit',
+        tiles: !!o.tiles, // Kacheln nebeneinander statt untereinander
         on: new Set(), // Gruppen-Keys der angezeigten Diagramme
         off: new Map(), // Gruppen-Key -> Set ausgeblendeter Kanaele
         range: null, // gewaehlter Zeitraum in UTC-Sekunden { min, max } (bleibt bei Zeitzonen-Wechsel)
@@ -180,10 +185,12 @@ export function createViewer(el, opts = {}) {
     }
     const cssVar = (name, fb) => getComputedStyle(el).getPropertyValue(name).trim() || fb
 
-    function plotHeight(hk) {
+    // tiled: Diagramm steht als Kachel neben anderen -> niedriger, damit mehr auf einen Blick passt
+    function plotHeight(hk, tiled) {
         const h = hk ? o.hkHeight : o.height
         if (typeof h === 'number') return h
         const vh = typeof innerHeight === 'number' ? innerHeight : 800
+        if (tiled) return hk ? clamp(Math.round(vh * 0.26), 180, 280) : clamp(Math.round(vh * 0.36), 220, 400)
         return hk ? clamp(Math.round(vh * 0.3), 200, 320) : clamp(Math.round(vh * 0.5), 300, 560)
     }
 
@@ -619,11 +626,20 @@ export function createViewer(el, opts = {}) {
                 return gs.length ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(hk ? t.device : t.measurements)}</span>`
                     + gs.map(chipHtml).join('') + `</div>` : ''
             }
+            const seg = (attr, v, pressed, l, tip = '') => `<button type="button" data-${attr}="${v}" aria-pressed="${pressed}"`
+                + `${tip ? ` title="${esc(tip)}"` : ''}>${esc(l)}</button>`
+            const segs = []
             // Darstellung der Messkanaele nur mit mehreren Einheiten waehlbar
-            const seg = (v, l) => `<button type="button" data-layout="${v}" aria-pressed="${st.layout === v}">${esc(l)}</button>`
-            const layoutRow = s.groups.filter(g => !g.hk).length > 1
-                ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(t.layout)}</span><div class="lv-seg" role="group"`
-                    + ` aria-label="${esc(t.layout)}">${seg('all', t.layoutAll)}${seg('unit', t.layoutUnit)}</div></div>` : ''
+            if (s.groups.filter(g => !g.hk).length > 1) {
+                segs.push(`<div class="lv-seg" role="group" aria-label="${esc(t.layout)}">`
+                    + seg('layout', 'all', st.layout === 'all', t.layoutAll) + seg('layout', 'unit', st.layout === 'unit', t.layoutUnit) + `</div>`)
+            }
+            // Untereinander / Kacheln: nur, wenn ein Bereich (Messwerte oder Geraetewerte) mehrere Diagramme hat
+            if (groups.filter(g => !g.hk).length > 1 || groups.filter(g => g.hk).length > 1) {
+                segs.push(`<div class="lv-seg" role="group" aria-label="${esc(t.arrange)}">`
+                    + seg('tiles', '0', !st.tiles, t.stacked, t.stackedTip) + seg('tiles', '1', st.tiles, t.tiles, t.tilesTip) + `</div>`)
+            }
+            const layoutRow = segs.length ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(t.layout)}</span>${segs.join('')}</div>` : ''
             selHtml = `<div class="lv-sel" role="group" aria-label="${esc(t.charts)}">${layoutRow}${row(false)}${row(true)}</div>`
         }
 
@@ -677,29 +693,34 @@ export function createViewer(el, opts = {}) {
         const xs = tm.shift ? s.x.map(v => v + tm.shift) : s.x
         const panels = el.querySelector('.lv-panels')
 
-        // Diagramme (neu) aufbauen, z. B. nach Ein-/Ausschalten in der Leiste; Zeitraum bleibt
+        // Diagramme (neu) aufbauen, z. B. nach Ein-/Ausschalten in der Leiste; Zeitraum bleibt.
+        // Je Bereich (Messwerte, Geraetewerte) ein Behaelter .lv-group; als Kacheln (.lv-tiles) nur, wenn der Bereich
+        // mehrere Diagramme zeigt - ein einzelnes bleibt gross mit Kanalliste daneben
         const buildPanels = () => {
             destroyPlots()
             panels.innerHTML = ''
-            let lastHk = null
+            const shown = groups.filter(g => st.on.has(g.key))
+            const tiled = hk => st.tiles && shown.filter(g => g.hk === hk).length > 1
+            let lastHk = null, box = null
             st.building = true
             const built = []
-            for (const g of groups) {
-                if (!st.on.has(g.key)) continue
+            for (const g of shown) {
                 if (g.hk !== lastHk) {
                     const h = document.createElement('h3')
                     h.className = 'lv-section'
                     h.textContent = g.hk ? t.device : t.measurements
-                    panels.appendChild(h)
+                    box = document.createElement('div')
+                    box.className = 'lv-group' + (tiled(g.hk) ? ' lv-tiles' : '')
+                    panels.append(h, box)
                     lastHk = g.hk
                 }
-                const height = plotHeight(g.hk)
+                const height = plotHeight(g.hk, tiled(g.hk))
                 const sec = document.createElement('section')
                 sec.className = 'lv-panel' + (g.hk ? ' lv-panel-hk' : '')
                 sec.style.setProperty('--lv-h', height + 'px')
                 sec.innerHTML = `<div class="lv-ph"><h4>${groupTitle(g)}</h4>${yRangeHtml()}</div>`
                     + `<div class="lv-body"><div class="lv-plot"></div>${legendHtml(g)}</div>`
-                panels.appendChild(sec)
+                box.appendChild(sec)
                 built.push({ g, sec, height })
             }
             // Kanallisten gleich breit, damit die Zeitachsen aller Diagramme untereinander stehen. Gemessen wird der
@@ -732,6 +753,16 @@ export function createViewer(el, opts = {}) {
             st.layout = b.dataset.layout
             o.onLayout?.(st.layout)
             render() // Zeitraum (st.range) bleibt
+        }))
+        // Untereinander / Kacheln: nur die Diagramme neu aufbauen (Zeitraum, y-Bereiche, Kanalauswahl bleiben)
+        const tileBtns = el.querySelectorAll('.lv-seg [data-tiles]')
+        tileBtns.forEach(b => b.addEventListener('click', () => {
+            const on = b.dataset.tiles === '1'
+            if (st.tiles === on) return
+            st.tiles = on
+            tileBtns.forEach(x => x.setAttribute('aria-pressed', String((x.dataset.tiles === '1') === on)))
+            o.onTiles?.(on)
+            buildPanels()
         }))
         el.querySelectorAll('.lv-chip').forEach(b => b.addEventListener('click', () => {
             const key = b.dataset.key
@@ -815,11 +846,12 @@ export function createViewer(el, opts = {}) {
             if (edt === null) throw new Error('no EDT file')
             return api.setData({ edt, iparam, title })
         },
-        /* Optionen aendern (lang, theme, time, layout, yMin, yMax, height, hkHeight) und neu zeichnen */
+        /* Optionen aendern (lang, theme, time, layout, tiles, yMin, yMax, height, hkHeight) und neu zeichnen */
         setOptions(n = {}) {
             Object.assign(o, n)
             if (n.time !== undefined) st.time = n.time
             if (n.layout !== undefined) st.layout = n.layout === 'all' ? 'all' : 'unit'
+            if (n.tiles !== undefined) st.tiles = !!n.tiles
             if (n.yMin !== undefined || n.yMax !== undefined) st.yr.set(ALL_KEY, yInit())
             render()
         },
@@ -834,6 +866,7 @@ export function createViewer(el, opts = {}) {
         },
         get series() { return st.series },
         get layout() { return st.layout },
+        get tiles() { return st.tiles },
         // y-Bereich des kombinierten Diagramms bzw. aller Diagramme { <Gruppen-Key>: { min, max } }
         get yRange() { return { ...(st.yr.get(ALL_KEY) ?? { min: null, max: null }) } },
         get yRanges() { return Object.fromEntries([...st.yr].map(([k, v]) => [k, { ...v }])) },

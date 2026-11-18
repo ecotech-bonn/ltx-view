@@ -10,9 +10,12 @@ Verwendet in **enviLog** (Bluetooth-App) und als eigenständige Seite, z. B. auf
 
 - Messkanäle wahlweise ein Diagramm je Einheit oder alle in einem Diagramm (Kombiniert: eine gemeinsame y-Achse ohne Trennung nach Einheiten, auch bei bis zu 90 Kanälen); y-Bereich bei jedem Diagramm in y min / y max änderbar, „auto“ trägt runde Grenzen aus den sichtbaren Werten ein, meist ab 0;
   Gerätewerte (Kanäle 90–99: Batterie, Innentemperatur …) getrennt
+- Anordnung untereinander oder als Kacheln nebeneinander (je Bereich Messwerte/Gerätewerte so viele Spalten, wie mit
+  Mindestbreite passen, schmal eine; Kanalliste dann unter dem Diagramm, Diagramme etwas niedriger). Zeigt ein Bereich
+  nur ein Diagramm, bleibt es groß
 - Leiste oben: Diagramme per Klick ein-/ausschalten, wirkt sofort (Zoom/Zeitraum bleibt); vorgewählt sind die
   Messwert-Diagramme
-- Kanalliste rechts neben jedem Diagramm (schmal/Handy: darunter): Kanal ein/aus, ab 4 Kanälen „Alle“/„Keine“
+- Kanalliste rechts neben jedem Diagramm (schmal/Handy und Kacheln: darunter): Kanal ein/aus, ab 4 Kanälen „Alle“/„Keine“
 - gemeinsame Zeitachse: Ziehen = zoomen (alle Diagramme), Doppelklick = alles, Knöpfe Alles / 30 / 7 / 1 Tag(e),
   Zeitraum frei über Von/Bis
 - Werte am Cursor in einem schwebenden Feld (Layout bleibt ruhig)
@@ -61,12 +64,15 @@ Optionen von `createViewer(el, opts)`:
 | `layout` | `'unit'` | Messkanäle: `'unit'` = ein Diagramm je Einheit, `'all'` = alle kombiniert in einem Diagramm (eine gemeinsame y-Achse); im Viewer umschaltbar (ab 2 Einheiten) |
 | `yMin`, `yMax` | – | y-Bereich im kombinierten Diagramm (fehlt = aus den Daten berechnet, meist ab 0); im Viewer änderbar, `viewer.yRange` liefert den aktuellen, `viewer.yRanges` die aller Diagramme (Schlüssel = Diagramm) |
 | `onLayout` | – | Rückruf `(layout)` nach Umschalten durch den Benutzer, z. B. zum Merken |
-| `height`, `hkHeight` | `'auto'` | Diagrammhöhe in px oder `'auto'` (nach Fensterhöhe: Messwerte 300–560, Gerätewerte 200–320) |
+| `tiles` | `false` | `true` = Diagramme als Kacheln nebeneinander; im Viewer umschaltbar (Untereinander/Kacheln), Getter `viewer.tiles` |
+| `onTiles` | – | Rückruf `(tiles)` nach Umschalten durch den Benutzer |
+| `height`, `hkHeight` | `'auto'` | Diagrammhöhe in px oder `'auto'` (nach Fensterhöhe: Messwerte 300–560, Gerätewerte 200–320; als Kachel 220–400 bzw. 180–280) |
 | `title` | – | Titel, falls weder iparam noch EDT einen Namen liefern |
 | `injectCss` | `true` | CSS selbst laden; `false`, wenn die Host-Seite `src/ltx-view.css` und `vendor/uplot/uPlot.min.css` einbindet |
 
 Farben lassen sich über CSS-Variablen `--lv-fg`, `--lv-muted`, `--lv-panel`, `--lv-border`, `--lv-grid`,
-`--lv-accent`, `--lv-btn` … am Container überschreiben.
+`--lv-accent`, `--lv-btn` … am Container überschreiben, die Mindestbreite einer Kachel über `--lv-tile-min`
+(Standard `30em`).
 
 Nur die Parser (ohne DOM, auch in Node):
 
