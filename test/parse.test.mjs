@@ -160,3 +160,7 @@ test('series: few values far apart are not joined (fallback: typical row interva
     assert.deepEqual(findGaps([0, 600, 1200], 1.5, 600), [])
     assert.deepEqual(findGaps([0, 600, 1200], 1.5, 0), [])
 })
+
+test('niceRange: step 2.5 avoids wasting space', () => {
+    assert.deepEqual(niceRange(-13, 1017), [-250, 1250])
+})

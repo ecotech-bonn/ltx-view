@@ -1,7 +1,8 @@
 /* view.js - Viewer: Diagramme (uPlot) fuer EDT-Daten, gemeinsame Zeitachse. Darstellung der Messkanaele waehlbar:
  * ein Diagramm je Einheit ('unit') oder alle Messkanaele kombiniert in einem Diagramm ('all') mit EINER gemeinsamen
- * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Deren Bereich steht
- * als Zahlen in y min / y max (aenderbar; "auto" berechnet runde Grenzen aus den sichtbaren Werten, meist ab 0).
+ * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Der y-Bereich jedes
+ * Diagramms steht als Zahlen in y min / y max im Diagrammkopf (aenderbar; "auto" berechnet runde Grenzen aus den
+ * sichtbaren Werten, meist ab 0).
  *
  *   const v = createViewer(element, { lang: 'de' })
  *   v.setData({ edt: text, iparam: text })          // iparam optional
@@ -119,7 +120,8 @@ function durText(sec) {
  *   theme      'auto' | 'light' | 'dark' ('auto': data-theme am <html>, sonst Systemeinstellung)
  *   time       'logger' | 'utc' | 'local' (Standard: 'logger', wenn der UTC-Versatz aus iparam bekannt ist, sonst 'local')
  *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele kombiniert, eine y-Achse)
- *   yMin, yMax y-Bereich im kombinierten Diagramm (Standard: aus den Daten, meist ab 0); im Viewer aenderbar
+ *   yMin, yMax y-Bereich im kombinierten Diagramm (Standard: aus den Daten, meist ab 0); im Viewer aenderbar wie
+ *              der Bereich jedes anderen Diagramms
  *   onLayout   Rueckruf (layout) nach Umschalten durch den Benutzer, z. B. zum Merken
  *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560), hkHeight dito (200-320)
  *   injectCss  CSS automatisch laden (true)
@@ -142,16 +144,16 @@ export function createViewer(el, opts = {}) {
         on: new Set(), // Gruppen-Keys der angezeigten Diagramme
         off: new Map(), // Gruppen-Key -> Set ausgeblendeter Kanaele
         range: null, // gewaehlter Zeitraum in UTC-Sekunden { min, max } (bleibt bei Zeitzonen-Wechsel)
-        yRange: { min: null, max: null }, // fester y-Bereich im kombinierten Diagramm (null = automatisch)
+        yr: new Map(), // Gruppen-Key -> y-Bereich { min, max } des Diagramms (Felder y min / y max, null = berechnen)
     }
-    // y-Bereich aus den Optionen (ungueltig -> automatisch)
+    // y-Bereich des kombinierten Diagramms aus den Optionen (ungueltig -> berechnen)
     function yInit() {
         const f = v => typeof v === 'number' && Number.isFinite(v) ? v : null
         let min = f(o.yMin), max = f(o.yMax)
         if (min != null && max != null && min >= max) min = max = null
         return { min, max }
     }
-    st.yRange = yInit()
+    st.yr.set(ALL_KEY, yInit())
     const syncKey = 'lv' + Math.random().toString(36).slice(2)
     el.classList.add('lv')
     let t = texts(o.lang)
@@ -329,15 +331,17 @@ export function createViewer(el, opts = {}) {
             values: (u, splits) => splits.map(v => v == null ? '' : nf.format(v)) }]
     }
 
-    // y-Bereich des kombinierten Diagramms: feste Grenzen aus st.yRange (Normalfall, die Felder zeigen immer Zahlen);
-    // nur ohne sichtbare Werte bleibt ein Feld leer, dann automatisch
-    function yRangeAll(u, dmin, dmax) {
-        const { min, max } = st.yRange
-        if (min != null && max != null) return [min, max]
-        let [a, b] = dmin == null ? [0, 1] : uPlot.rangeNum(dmin, dmax, Y_PAD, true)
-        if (min != null) { a = min; if (b <= a) b = a + (Math.abs(a) || 1) }
-        if (max != null) { b = max; if (a >= b) a = b - (Math.abs(b) || 1) }
-        return [a, b]
+    // y-Bereich eines Diagramms (uPlot scales.y.range): feste Grenzen aus st.yr (Normalfall, die Felder zeigen immer
+    // Zahlen); nur ohne sichtbare Werte bleibt ein Feld leer, dann automatisch
+    function yRangeFn(key) {
+        return (u, dmin, dmax) => {
+            const { min, max } = st.yr.get(key) ?? { min: null, max: null }
+            if (min != null && max != null) return [min, max]
+            let [a, b] = dmin == null ? [0, 1] : uPlot.rangeNum(dmin, dmax, Y_PAD, true)
+            if (min != null) { a = min; if (b <= a) b = a + (Math.abs(a) || 1) }
+            if (max != null) { b = max; if (a >= b) a = b - (Math.abs(b) || 1) }
+            return [a, b]
+        }
     }
 
     function makePlot(g, xs, mount, tm, markers, theme, onRange, height) {
@@ -382,7 +386,7 @@ export function createViewer(el, opts = {}) {
                     return si === 0 || typeof u.data[si][k] === 'number' ? k : null
                 },
             },
-            scales: { x: { time: true }, ...(g.all ? { y: { range: yRangeAll } } : {}) },
+            scales: { x: { time: true }, y: { range: yRangeFn(g.key) } },
             legend: { show: false }, // eigene Kanalliste rechts, Werte im schwebenden Feld
             series,
             axes: [
@@ -518,7 +522,7 @@ export function createViewer(el, opts = {}) {
         }))
     }
 
-    // Felder y min / y max am kombinierten Diagramm. Sie zeigen immer die Zahlen des aktuellen Bereichs; 'auto' und
+    // Felder y min / y max im Kopf jedes Diagramms. Sie zeigen immer die Zahlen des aktuellen Bereichs; 'auto' und
     // leere Felder werden aus den sichtbaren Werten berechnet und eingetragen (Werte setzt bindYRange)
     function yRangeHtml() {
         const inp = (k, l) => `<label>${esc(l)} <input type="text" inputmode="decimal" data-y="${k}" placeholder="${esc(t.auto)}"`
@@ -561,8 +565,9 @@ export function createViewer(el, opts = {}) {
         return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(x) ? Number(x) : NaN
     }
 
-    // vals: [min, max] (Zahl, null = berechnen, NaN = ungueltig); full: Berechnung ueber die ganzen Daten
-    function bindYRange(box, u) {
+    // Felder eines Diagramms (Gruppe key) binden. apply(vals, full): vals [min, max] (Zahl, null = berechnen,
+    // NaN = ungueltig); full: Berechnung ueber die ganzen Daten statt ueber den gezeigten Zeitraum
+    function bindYRange(box, u, key) {
         const ins = [...box.querySelectorAll('input[data-y]')]
         const nf = new Intl.NumberFormat(locale, { useGrouping: false, maximumFractionDigits: 6 })
         const apply = (vals, full = false) => {
@@ -573,16 +578,17 @@ export function createViewer(el, opts = {}) {
             if (a == null || b == null) {
                 const r = autoRange(u, full)
                 if (r) {
-                    // eine Grenze vorgegeben, die andere berechnet: muss dazu passen, sonst Abstand wie yRangeAll
+                    // eine Grenze vorgegeben, die andere berechnet: muss dazu passen, sonst Abstand wie yRangeFn
                     if (a == null && b == null) [a, b] = r
                     else if (a == null) a = r[0] < b ? r[0] : b - (Math.abs(b) || 1)
                     else b = r[1] > a ? r[1] : a + (Math.abs(a) || 1)
                 }
             }
-            st.yRange = { min: a, max: b }
-            for (const i of ins) i.value = st.yRange[i.dataset.y] == null ? '' : nf.format(st.yRange[i.dataset.y])
-            // min/max null = neu skalieren, dabei bestimmt yRangeAll den Bereich. (Feste Zahlen hier wuerden uPlot
-            // genau diesen Bereich setzen lassen, ohne yRangeAll aufzurufen.)
+            const yr = { min: a, max: b }
+            st.yr.set(key, yr)
+            for (const i of ins) i.value = yr[i.dataset.y] == null ? '' : nf.format(yr[i.dataset.y])
+            // min/max null = neu skalieren, dabei bestimmt yRangeFn den Bereich. (Feste Zahlen hier wuerden uPlot
+            // genau diesen Bereich setzen lassen, ohne yRangeFn aufzurufen.)
             u.setScale('y', { min: null, max: null })
         }
         const fromInputs = () => apply(ins.map(i => parseNum(i.value)))
@@ -593,7 +599,8 @@ export function createViewer(el, opts = {}) {
         // auto: Bereich aus den sichtbaren Kanaelen im gezeigten Zeitraum
         box.querySelector('button[data-y="auto"]').addEventListener('click', () => apply([null, null]))
         // Start: vorgegebene Grenzen (Optionen oder vorherige Eingabe), fehlende aus den ganzen Daten berechnen
-        apply([st.yRange.min, st.yRange.max], true)
+        const cur = st.yr.get(key)
+        apply([cur?.min ?? null, cur?.max ?? null], true)
     }
 
     function renderCharts(s, tm, theme) {
@@ -690,7 +697,7 @@ export function createViewer(el, opts = {}) {
                 const sec = document.createElement('section')
                 sec.className = 'lv-panel' + (g.hk ? ' lv-panel-hk' : '')
                 sec.style.setProperty('--lv-h', height + 'px')
-                sec.innerHTML = `<div class="lv-ph"><h4>${groupTitle(g)}</h4>${g.all ? yRangeHtml() : ''}</div>`
+                sec.innerHTML = `<div class="lv-ph"><h4>${groupTitle(g)}</h4>${yRangeHtml()}</div>`
                     + `<div class="lv-body"><div class="lv-plot"></div>${legendHtml(g)}</div>`
                 panels.appendChild(sec)
                 built.push({ g, sec, height })
@@ -711,7 +718,7 @@ export function createViewer(el, opts = {}) {
                 st.plots.push(u)
                 ro?.observe(mount)
                 bindLegend(sec.querySelector('.lv-legend'), u, g)
-                if (g.all) bindYRange(sec.querySelector('.lv-yr'), u)
+                bindYRange(sec.querySelector('.lv-yr'), u, g.key)
             }
             st.building = false
             if (!st.plots.length) panels.innerHTML = `<div class="lv-empty">${esc(t.noChart)}</div>`
@@ -776,7 +783,7 @@ export function createViewer(el, opts = {}) {
             st.off = new Map(groups.map(g => [g.key, new Set()]))
             st.off.set(ALL_KEY, new Set())
             st.range = null
-            st.yRange = yInit() // neue Daten: y-Bereich wieder wie in den Optionen
+            st.yr = new Map([[ALL_KEY, yInit()]]) // neue Daten: y-Bereiche neu berechnen (kombiniert: wie in den Optionen)
             render()
             return st.series
         },
@@ -813,7 +820,7 @@ export function createViewer(el, opts = {}) {
             Object.assign(o, n)
             if (n.time !== undefined) st.time = n.time
             if (n.layout !== undefined) st.layout = n.layout === 'all' ? 'all' : 'unit'
-            if (n.yMin !== undefined || n.yMax !== undefined) st.yRange = yInit()
+            if (n.yMin !== undefined || n.yMax !== undefined) st.yr.set(ALL_KEY, yInit())
             render()
         },
         refresh: () => render(),
@@ -827,7 +834,9 @@ export function createViewer(el, opts = {}) {
         },
         get series() { return st.series },
         get layout() { return st.layout },
-        get yRange() { return { ...st.yRange } },
+        // y-Bereich des kombinierten Diagramms bzw. aller Diagramme { <Gruppen-Key>: { min, max } }
+        get yRange() { return { ...(st.yr.get(ALL_KEY) ?? { min: null, max: null }) } },
+        get yRanges() { return Object.fromEntries([...st.yr].map(([k, v]) => [k, { ...v }])) },
     }
     return api
 }

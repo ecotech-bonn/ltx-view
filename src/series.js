@@ -86,7 +86,7 @@ function isolatedIdx(data) {
 /* Runder y-Bereich fuer die Werte lo..hi (Knopf 'auto' im kombinierten Diagramm) -> [min, max], ohne Werte null.
  * Untergrenze in der Regel 0: nur nicht, wenn Werte negativ sind oder so hoch liegen, dass sie ab 0 weniger als ein
  * Viertel der Hoehe nutzen wuerden (lo > 3/4 hi, z. B. Luftdruck 1000-1010). Nur negative Werte: Obergrenze 0
- * (gespiegelt). Grenzen auf eine runde Schrittweite (1, 2, 5 x 10^n, etwa 5 Schritte), mit etwas Rand. */
+ * (gespiegelt). Grenzen auf eine runde Schrittweite (1, 2, 2,5, 5 x 10^n, etwa 5 Schritte), mit etwas Rand. */
 export function niceRange(lo, hi) {
     if (lo == null || hi == null || !Number.isFinite(lo) || !Number.isFinite(hi)) return null
     if (lo === 0 && hi === 0) return [0, 1]
@@ -96,7 +96,7 @@ export function niceRange(lo, hi) {
     const span = b - a || Math.abs(a) || 1
     const raw = span / 5
     const mag = 10 ** Math.floor(Math.log10(raw))
-    const step = [1, 2, 5, 10].map(f => f * mag).find(s => s >= raw * 0.999)
+    const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(s => s >= raw * 0.999)
     const dec = Math.max(0, -Math.floor(Math.log10(step)) + 1)
     const r = v => Number(v.toFixed(dec))
     const pad = span * 0.02
