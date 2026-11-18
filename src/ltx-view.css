@@ -161,6 +161,70 @@
     margin-left: 0.5em;
 }
 
+/* Kopf eines Diagramms: Titel links, im kombinierten Diagramm rechts y min / y max */
+.lv-ph {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.3em 1em;
+    margin-bottom: 0.3em;
+}
+
+.lv-ph h4 {
+    margin-bottom: 0;
+}
+
+.lv-yr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.85em;
+    color: var(--lv-muted);
+}
+
+.lv-yr label {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+}
+
+.lv-yr input {
+    font: inherit;
+    width: 6.5em;
+    color: var(--lv-fg);
+    background: var(--lv-btn);
+    border: 1px solid var(--lv-border);
+    border-radius: 6px;
+    padding: 0.2em 0.4em;
+    font-variant-numeric: tabular-nums;
+}
+
+.lv-yr input:focus-visible,
+.lv-yr button:focus-visible {
+    outline: 2px solid var(--lv-accent);
+    outline-offset: 1px;
+}
+
+.lv-yr input.lv-bad {
+    border-color: var(--lv-warn);
+}
+
+.lv-yr button {
+    font: inherit;
+    color: var(--lv-accent);
+    background: transparent;
+    border: 1px solid var(--lv-border);
+    border-radius: 6px;
+    padding: 0.2em 0.6em;
+    cursor: pointer;
+}
+
+.lv-yr button:hover {
+    background: var(--lv-btn-hover);
+}
+
 /* Diagramm links, Kanalliste rechts; schmal (Handy): Kanalliste darunter */
 .lv-body {
     display: grid;
@@ -309,7 +373,7 @@
     font-weight: 600;
 }
 
-/* Darstellung Komplett / Nach Einheiten: zwei verbundene Knoepfe */
+/* Darstellung Kombiniert / Nach Einheiten: zwei verbundene Knoepfe */
 .lv-seg {
     display: inline-flex;
     border: 1px solid var(--lv-border);

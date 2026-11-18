@@ -1,5 +1,7 @@
 /* view.js - Viewer: Diagramme (uPlot) fuer EDT-Daten, gemeinsame Zeitachse. Darstellung der Messkanaele waehlbar:
- * ein Diagramm je Einheit ('unit') oder alle Messkanaele in einem Diagramm mit einer y-Achse je Einheit ('all').
+ * ein Diagramm je Einheit ('unit') oder alle Messkanaele kombiniert in einem Diagramm ('all') mit EINER gemeinsamen
+ * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Deren Bereich ist
+ * automatisch oder per y min / y max fest vorgegeben.
  *
  *   const v = createViewer(element, { lang: 'de' })
  *   v.setData({ edt: text, iparam: text })          // iparam optional
@@ -23,8 +25,8 @@ const TIP_ROWS = 12 // max. Kanaele im Werte-Feld
 const PT_SIZE = 4 // Messpunkt (Durchmesser, px)
 const PT_SPACE = 6 // Messpunkte erst zeigen, wenn sie mind. so weit (px) auseinander liegen
 const ALL_KEY = 'all' // Gruppe 'alle Messkanaele' (Darstellung 'all'); andere Keys beginnen mit 'ch:'/'hk:'
-const AX_SIZE = 64 // Breite einer y-Achse (Zahlen)
-const AX_LABEL = 20 // zusaetzlich fuer die Einheit an der Achse (Darstellung 'all')
+const AX_SIZE = 64 // Breite der y-Achse (Zahlen), in allen Diagrammen gleich -> Zeitachsen stehen untereinander
+const Y_PAD = 0.1 // automatischer y-Bereich: Rand ober-/unterhalb der Werte (Anteil, wie uPlot)
 
 let cssDone = false
 function injectCss() {
@@ -63,7 +65,8 @@ function durText(sec) {
  *   lang       'de' | 'en' (Standard: Browsersprache)
  *   theme      'auto' | 'light' | 'dark' ('auto': data-theme am <html>, sonst Systemeinstellung)
  *   time       'logger' | 'utc' | 'local' (Standard: 'logger', wenn der UTC-Versatz aus iparam bekannt ist, sonst 'local')
- *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele in einem Diagramm)
+ *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele kombiniert, eine y-Achse)
+ *   yMin, yMax fester y-Bereich im kombinierten Diagramm (Standard: automatisch); im Viewer aenderbar
  *   onLayout   Rueckruf (layout) nach Umschalten durch den Benutzer, z. B. zum Merken
  *   height     Hoehe je Messwert-Diagramm in px oder 'auto' (nach Fensterhoehe, 300-560), hkHeight dito (200-320)
  *   injectCss  CSS automatisch laden (true)
@@ -79,7 +82,16 @@ export function createViewer(el, opts = {}) {
         on: new Set(), // Gruppen-Keys der angezeigten Diagramme
         off: new Map(), // Gruppen-Key -> Set ausgeblendeter Kanaele
         range: null, // gewaehlter Zeitraum in UTC-Sekunden { min, max } (bleibt bei Zeitzonen-Wechsel)
+        yRange: { min: null, max: null }, // fester y-Bereich im kombinierten Diagramm (null = automatisch)
     }
+    // y-Bereich aus den Optionen (ungueltig -> automatisch)
+    function yInit() {
+        const f = v => typeof v === 'number' && Number.isFinite(v) ? v : null
+        let min = f(o.yMin), max = f(o.yMax)
+        if (min != null && max != null && min >= max) min = max = null
+        return { min, max }
+    }
+    st.yRange = yInit()
     const syncKey = 'lv' + Math.random().toString(36).slice(2)
     el.classList.add('lv')
     let t = texts(o.lang)
@@ -172,7 +184,7 @@ export function createViewer(el, opts = {}) {
         return s
     }
 
-    // Name eines Kanals in Liste/Werte-Feld; im Gesamtdiagramm mit Einheit
+    // Name eines Kanals in Liste/Werte-Feld; im kombinierten Diagramm mit Einheit (die Achse hat keine)
     function seriesLabel(g, c) {
         return g.all ? `${chanLabel(c)} · ${c.unit || t.noUnit}` : chanLabel(c)
     }
@@ -188,7 +200,7 @@ export function createViewer(el, opts = {}) {
 
     // Titel (HTML): Einheit bzw. HK-Name; fruehere Einheiten der Kanaele (anderer Parametersatz) gedimmt
     function groupTitle(g) {
-        if (g.all) return esc(`${t.allChannels} · ${g.units.map(u => u || t.noUnit).join(', ')}`)
+        if (g.all) return esc(t.allChannels) + ` <small>${esc(g.units.map(u => u || t.noUnit).join(', '))}</small>`
         const unit = g.unit || t.noUnit
         if (g.hk) return esc(`${g.channels.map(chanLabel).join(', ')} · ${unit}`)
         const older = [...new Set(g.channels.flatMap(c => c.units))].filter(u => u !== g.unit).map(u => u || t.noUnit)
@@ -246,35 +258,23 @@ export function createViewer(el, opts = {}) {
         tip.style.transform = `translate(${Math.max(0, Math.round(x))}px, ${Math.max(0, Math.round(y))}px)`
     }
 
-    // y-Achsen: Darstellung 'unit' eine links; 'all' eine je Einheit, abwechselnd links/rechts, mit Einheit.
-    // pad: { left, right } (px) = Achsenbreite des Gesamtdiagramms; andere Diagramme bekommen leere Achsen dazu,
-    // damit die Zeitachsen aller Diagramme untereinander stehen.
-    const unitsOf = g => [...new Set(g.channels.map(c => c.unit))]
-    function yAxes(g, fg, grid, nf, pad) {
-        const values = (u, splits) => splits.map(v => v == null ? '' : nf.format(v))
-        const empty = (side, size) => ({ scale: 'y', side, size, stroke: 'transparent', grid: { show: false },
-            ticks: { show: false }, values: (u, splits) => splits.map(() => '') })
-        if (!g.all) {
-            const axes = [{ stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: AX_SIZE, values }]
-            if (pad && pad.left > AX_SIZE) axes.push(empty(3, pad.left - AX_SIZE))
-            if (pad && pad.right > 0) axes.push(empty(1, pad.right))
-            return axes
-        }
-        return unitsOf(g).map((unit, k) => ({
-            scale: 'u:' + unit, side: k % 2 ? 1 : 3, stroke: fg, size: AX_SIZE,
-            label: unit || t.noUnit, labelSize: AX_LABEL, labelGap: 0, labelFont: '600 12px system-ui, sans-serif',
-            grid: { show: k === 0, stroke: grid, width: 1 }, ticks: { stroke: grid }, values,
-        }))
-    }
-    function axesPad(groups) {
-        const g = groups.find(x => x.all)
-        if (!g) return null
-        const n = unitsOf(g).length
-        const w = AX_SIZE + AX_LABEL
-        return { left: Math.ceil(n / 2) * w, right: Math.floor(n / 2) * w }
+    // y-Achse: eine links, in allen Diagrammen gleich breit (auch kombiniert: keine Achse je Einheit)
+    function yAxes(fg, grid, nf) {
+        return [{ stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: AX_SIZE,
+            values: (u, splits) => splits.map(v => v == null ? '' : nf.format(v)) }]
     }
 
-    function makePlot(g, xs, mount, tm, markers, theme, onRange, height, pad) {
+    // y-Bereich des kombinierten Diagramms: feste Grenzen aus st.yRange, fehlende automatisch aus den sichtbaren Werten
+    function yRangeAll(u, dmin, dmax) {
+        const { min, max } = st.yRange
+        if (min != null && max != null) return [min, max]
+        let [a, b] = dmin == null ? [0, 1] : uPlot.rangeNum(dmin, dmax, Y_PAD, true)
+        if (min != null) { a = min; if (b <= a) b = a + (Math.abs(a) || 1) }
+        if (max != null) { b = max; if (a >= b) a = b - (Math.abs(b) || 1) }
+        return [a, b]
+    }
+
+    function makePlot(g, xs, mount, tm, markers, theme, onRange, height) {
         const chans = g.channels
         const off = st.off.get(g.key)
         const nf = new Intl.NumberFormat(locale, { maximumFractionDigits: 6 })
@@ -285,7 +285,6 @@ export function createViewer(el, opts = {}) {
         let snap = null // eingerasteter Index (Cursor-Linie auf Messpunkt)
         chans.forEach((c, i) => series.push({
             label: seriesLabel(g, c),
-            ...(g.all ? { scale: 'u:' + c.unit } : {}),
             stroke: color(i),
             width: 1.5,
             spanGaps: false,
@@ -316,12 +315,12 @@ export function createViewer(el, opts = {}) {
                     return si === 0 || typeof u.data[si][k] === 'number' ? k : null
                 },
             },
-            scales: { x: { time: true }, ...(g.all ? Object.fromEntries(unitsOf(g).map(un => ['u:' + un, {}])) : {}) },
+            scales: { x: { time: true }, ...(g.all ? { y: { range: yRangeAll } } : {}) },
             legend: { show: false }, // eigene Kanalliste rechts, Werte im schwebenden Feld
             series,
             axes: [
                 { stroke: fg, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, values: axisStamps(), size: 46 },
-                ...yAxes(g, fg, grid, nf, pad),
+                ...yAxes(fg, grid, nf),
             ],
             hooks: {
                 setScale: [(u, key) => {
@@ -372,7 +371,7 @@ export function createViewer(el, opts = {}) {
             if (!u.series[i + 1].show) return
             for (const lim of [c.alarmHi, c.alarmLo]) {
                 if (lim == null) continue
-                const py = Math.round(u.valToPos(lim, u.series[i + 1].scale ?? 'y', true))
+                const py = Math.round(u.valToPos(lim, 'y', true))
                 if (py < top || py > top + height) continue
                 ctx.strokeStyle = color(i)
                 ctx.beginPath()
@@ -452,6 +451,42 @@ export function createViewer(el, opts = {}) {
         }))
     }
 
+    // Felder y min / y max am kombinierten Diagramm (leer = automatisch)
+    function yRangeHtml() {
+        const nf = new Intl.NumberFormat(locale, { useGrouping: false, maximumFractionDigits: 6 })
+        const inp = (k, l) => `<label>${esc(l)} <input type="text" inputmode="decimal" data-y="${k}" placeholder="${esc(t.auto)}"`
+            + ` value="${st.yRange[k] == null ? '' : esc(nf.format(st.yRange[k]))}" autocomplete="off" spellcheck="false"></label>`
+        return `<div class="lv-yr" role="group" aria-label="${esc(t.yRange)}" title="${esc(t.yRangeTip)}">`
+            + `${inp('min', t.yMin)}${inp('max', t.yMax)}<button type="button" data-y="auto">${esc(t.auto)}</button></div>`
+    }
+
+    // Eingabe (Komma oder Punkt) -> Zahl, leer -> null, ungueltig -> NaN
+    function parseNum(v) {
+        const x = v.trim().replace(',', '.')
+        if (x === '') return null
+        return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(x) ? Number(x) : NaN
+    }
+
+    function bindYRange(box, u) {
+        const ins = [...box.querySelectorAll('input[data-y]')]
+        const apply = () => {
+            const [a, b] = ins.map(i => parseNum(i.value))
+            const bad = Number.isNaN(a) || Number.isNaN(b) || (a != null && b != null && a >= b)
+            for (const i of ins) i.classList.toggle('lv-bad', bad)
+            if (bad) return
+            st.yRange = { min: a, max: b }
+            u.setScale('y', { min: 0, max: 1 }) // Werte egal: range (yRangeAll) bestimmt den Bereich neu
+        }
+        ins.forEach(i => {
+            i.addEventListener('change', apply)
+            i.addEventListener('keydown', ev => { if (ev.key === 'Enter') apply() })
+        })
+        box.querySelector('button[data-y="auto"]').addEventListener('click', () => {
+            for (const i of ins) i.value = ''
+            apply()
+        })
+    }
+
     function renderCharts(s, tm, theme) {
         const ip = st.ip
         const span = s.stats.t1 - s.stats.t0
@@ -461,7 +496,6 @@ export function createViewer(el, opts = {}) {
         const ranges = [30, 7, 1].filter(d => d * DAY < span)
 
         const groups = viewGroups(s)
-        const pad = axesPad(groups)
         let selHtml = ''
         if (s.groups.length > 1) {
             const row = hk => {
@@ -547,7 +581,8 @@ export function createViewer(el, opts = {}) {
                 const sec = document.createElement('section')
                 sec.className = 'lv-panel' + (g.hk ? ' lv-panel-hk' : '')
                 sec.style.setProperty('--lv-h', height + 'px')
-                sec.innerHTML = `<h4>${groupTitle(g)}</h4><div class="lv-body"><div class="lv-plot"></div>${legendHtml(g)}</div>`
+                sec.innerHTML = `<div class="lv-ph"><h4>${groupTitle(g)}</h4>${g.all ? yRangeHtml() : ''}</div>`
+                    + `<div class="lv-body"><div class="lv-plot"></div>${legendHtml(g)}</div>`
                 panels.appendChild(sec)
                 built.push({ g, sec, height })
             }
@@ -562,10 +597,10 @@ export function createViewer(el, opts = {}) {
             }
             if (legW) panels.style.setProperty('--lv-legw', Math.ceil(legW) + 'px')
             for (const { g, sec, height } of built) {
-                const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height,
-                    pad && !g.all && st.on.has(ALL_KEY) ? pad : null)
+                const u = makePlot(g, xs, sec.querySelector('.lv-plot'), tm, markers, theme, onRange, height)
                 st.plots.push(u)
                 bindLegend(sec.querySelector('.lv-legend'), u, g)
+                if (g.all) bindYRange(sec.querySelector('.lv-yr'), u)
             }
             st.building = false
             if (!st.plots.length) panels.innerHTML = `<div class="lv-empty">${esc(t.noChart)}</div>`
@@ -630,6 +665,7 @@ export function createViewer(el, opts = {}) {
             st.off = new Map(groups.map(g => [g.key, new Set()]))
             st.off.set(ALL_KEY, new Set())
             st.range = null
+            st.yRange = yInit() // neue Daten: y-Bereich wieder wie in den Optionen
             render()
             return st.series
         },
@@ -661,11 +697,12 @@ export function createViewer(el, opts = {}) {
             if (edt === null) throw new Error('no EDT file')
             return api.setData({ edt, iparam, title })
         },
-        /* Optionen aendern (lang, theme, time, layout, height, hkHeight) und neu zeichnen */
+        /* Optionen aendern (lang, theme, time, layout, yMin, yMax, height, hkHeight) und neu zeichnen */
         setOptions(n = {}) {
             Object.assign(o, n)
             if (n.time !== undefined) st.time = n.time
             if (n.layout !== undefined) st.layout = n.layout === 'all' ? 'all' : 'unit'
+            if (n.yMin !== undefined || n.yMax !== undefined) st.yRange = yInit()
             render()
         },
         refresh: () => render(),
@@ -678,6 +715,7 @@ export function createViewer(el, opts = {}) {
         },
         get series() { return st.series },
         get layout() { return st.layout },
+        get yRange() { return { ...st.yRange } },
     }
     return api
 }
