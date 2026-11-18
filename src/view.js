@@ -460,9 +460,13 @@ export function createViewer(el, opts = {}) {
             + `${inp('min', t.yMin)}${inp('max', t.yMax)}<button type="button" data-y="auto">${esc(t.auto)}</button></div>`
     }
 
-    // Eingabe (Komma oder Punkt) -> Zahl, leer -> null, ungueltig -> NaN
+    // Eingabe (Komma oder Punkt) -> Zahl, leer -> null, ungueltig -> NaN. Stehen beide Zeichen drin, ist das
+    // hintere das Dezimalzeichen und das andere Tausendertrennung (1.000,5 und 1,000.5 -> 1000.5)
     function parseNum(v) {
-        const x = v.trim().replace(',', '.')
+        let x = v.replace(/\s/g, '')
+        const c = x.lastIndexOf(','), d = x.lastIndexOf('.')
+        if (c >= 0 && d >= 0) x = c > d ? x.replace(/\./g, '').replace(',', '.') : x.replace(/,/g, '')
+        else x = x.replace(',', '.')
         if (x === '') return null
         return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(x) ? Number(x) : NaN
     }
@@ -475,7 +479,9 @@ export function createViewer(el, opts = {}) {
             for (const i of ins) i.classList.toggle('lv-bad', bad)
             if (bad) return
             st.yRange = { min: a, max: b }
-            u.setScale('y', { min: 0, max: 1 }) // Werte egal: range (yRangeAll) bestimmt den Bereich neu
+            // min/max null = neu automatisch skalieren, dabei bestimmt yRangeAll den Bereich. (Feste Zahlen hier
+            // wuerden uPlot genau diesen Bereich setzen lassen, ohne yRangeAll aufzurufen.)
+            u.setScale('y', { min: null, max: null })
         }
         ins.forEach(i => {
             i.addEventListener('change', apply)
