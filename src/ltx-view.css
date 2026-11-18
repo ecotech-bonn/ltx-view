@@ -433,6 +433,7 @@
     padding: 0.2em 0.4em;
     display: flex;
     align-items: center;
+    justify-content: flex-start; /* linksbuendig, auch wenn die Seite Knoepfe zentriert */
     gap: 0.45em;
     width: 100%;
     text-align: left;

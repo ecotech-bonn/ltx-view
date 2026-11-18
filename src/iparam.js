@@ -28,7 +28,9 @@ function sdiParts(x) {
  *   type, maxChannels, hkFlags, cookie, name, period, periodOffset, alarmPeriod, utcOffset,
  *   recFlags, hkActive, hkReload,
  *   channels: { <n>: { action, measure, cache, alarm, phys, unit, format, dbId, offset, factor,
- *                      alarmHi, alarmLo, xbytes, sdi: {warmup, addr, cmd} | null } }
+ *                      alarmHi, alarmLo, xbytes, sdi: {warmup, addr, cmd} | null,
+ *                      src: Kanal des Sensors, aus dessen Cache gelesen wird (nur Cache-Kanaele, sonst null),
+ *                      srcSdi: dessen SDI-Teile | null } }
  * }
  * Wirft einen Error, wenn die Datei keine iparam-Datei ist. */
 export function parseIparam(text) {
@@ -76,6 +78,17 @@ export function parseIparam(text) {
             sdi: sdiParts(c[13]),
         }
         i += CHAN_LINES
+    }
+    // Cache-Kanaele lesen aus dem Cache des letzten Messkanals davor (wie im Kanal-Editor von enviLog);
+    // Kanaele ohne Aktion zaehlen nicht
+    let sensor = null
+    for (const n of Object.keys(res.channels).map(Number).sort((a, b) => a - b)) {
+        const c = res.channels[n]
+        c.src = null
+        c.srcSdi = null
+        if (!c.measure) continue
+        if (!c.cache) { sensor = n; continue }
+        if (sensor != null) { c.src = sensor; c.srcSdi = res.channels[sensor].sdi }
     }
     return res
 }

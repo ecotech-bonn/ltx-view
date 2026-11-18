@@ -90,6 +90,21 @@ test('iparam: base block and channels incl. empty lines', () => {
     assert.throws(() => parseIparam('@200\n'))
 })
 
+test('iparam: cache channels take the SDI address of the sensor before them', () => {
+    const base = '@100\n1700\n30\n31\n1000000000\nLTX\n600\n0\n0\n3600\n0\n3600\n3\n31\n6\n1\n0\n-10\n0\n\n0\n'
+    const ch = (n, action, xb) => `@${n}\n${action}\n768\n\n0\nm\n9\n0\n0.0\n1.0\n\n\n60\n${xb}\n`
+    // 0: Sensor SDI 0, 1: Cache, 2: ohne Aktion, 3: Cache, 4: Sensor SDI 5, 5: Cache
+    const ip = parseIparam(base + ch(0, 1, '0M!') + ch(1, 3, '') + ch(2, 0, '') + ch(3, 3, '') + ch(4, 1, '*500 5MC') + ch(5, 3, ''))
+    const c = ip.channels
+    assert.equal(c[0].src, null)
+    assert.equal(c[1].src, 0)
+    assert.equal(c[1].srcSdi.addr, '0')
+    assert.equal(c[2].src, null)
+    assert.equal(c[3].srcSdi.addr, '0')
+    assert.equal(c[5].src, 4)
+    assert.equal(c[5].srcSdi.addr, '5')
+})
+
 test('series: gap reaches the next value although other channels have points in between', () => {
     const edt = parseEdt('!U 0:m 1:m\n!1700000000 0:1 1:1\n!+600 0:2 1:2\n!+600 0:3 1:3\n!+600 1:4\n!+600 1:5\n!+600 1:6\n!+600 0:4 1:7\n')
     const d = buildSeries(edt, null).channels.find(c => c.ch === 0).data

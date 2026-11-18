@@ -180,7 +180,8 @@ export function createViewer(el, opts = {}) {
     function chanLabel(c) {
         if (c.hk) return t.hk[c.ch] ?? `${t.channel} ${c.ch}`
         let s = `${t.channel} ${c.ch}`
-        if (c.meta?.sdi) s += ` (SDI ${c.meta.sdi.addr})`
+        const sdi = c.meta?.sdi ?? c.meta?.srcSdi // Cache-Kanal: Adresse des Sensors, aus dessen Cache er liest
+        if (sdi) s += ` (SDI ${sdi.addr})`
         return s
     }
 
