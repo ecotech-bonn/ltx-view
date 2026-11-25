@@ -1,6 +1,7 @@
 /* view.js - Viewer: Diagramme (uPlot) fuer EDT-Daten, gemeinsame Zeitachse. Darstellung der Messkanaele waehlbar:
- * ein Diagramm je Einheit ('unit') oder alle Messkanaele kombiniert in einem Diagramm ('all') mit EINER gemeinsamen
- * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar). Der y-Bereich jedes
+ * ein Diagramm je Einheit ('unit'), alle Messkanaele kombiniert in einem Diagramm ('all') mit EINER gemeinsamen
+ * y-Achse ohne Trennung nach Einheiten (bis zu ~90 Kanaele: eine Achse je Einheit wird unlesbar) oder ein Diagramm je
+ * SDI-12-Geraet ('sdi', Adresse aus iparam; ebenfalls eine y-Achse fuer alle Kanaele des Geraets). Der y-Bereich jedes
  * Diagramms steht als Zahlen in y min / y max im Diagrammkopf (aenderbar; "auto" berechnet runde Grenzen aus den
  * sichtbaren Werten, meist ab 0). Anordnung waehlbar: untereinander oder als Kacheln nebeneinander (je Bereich
  * Messwerte / Geraetewerte ein Raster, Spaltenzahl nach Breite).
@@ -17,7 +18,7 @@
 import uPlot from '../vendor/uplot/uPlot.esm.js'
 import { parseEdt, stripBom } from './edt.js'
 import { parseIparam } from './iparam.js'
-import { buildSeries, niceRange } from './series.js'
+import { buildSeries, niceRange, sdiGroups } from './series.js'
 import { texts } from './i18n.js'
 
 const PALETTE = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#17becf', '#bcbd22', '#7f7f7f']
@@ -26,7 +27,9 @@ const DAY = 86400
 const TIP_ROWS = 12 // max. Kanaele im Werte-Feld
 const PT_SIZE = 4 // Messpunkt (Durchmesser, px)
 const PT_SPACE = 6 // Messpunkte erst zeigen, wenn sie mind. so weit (px) auseinander liegen
-const ALL_KEY = 'all' // Gruppe 'alle Messkanaele' (Darstellung 'all'); andere Keys beginnen mit 'ch:'/'hk:'
+const ALL_KEY = 'all' // Gruppe 'alle Messkanaele' (Darstellung 'all'); andere Keys beginnen mit 'ch:'/'hk:'/'sdi:'
+const LAYOUTS = ['all', 'unit', 'sdi']
+const normLayout = v => LAYOUTS.includes(v) ? v : 'unit'
 const AX_SIZE = 64 // Breite der y-Achse (Zahlen), in allen Diagrammen gleich -> Zeitachsen stehen untereinander
 const Y_PAD = 0.1 // automatischer y-Bereich: Rand ober-/unterhalb der Werte (Anteil, wie uPlot)
 
@@ -120,7 +123,8 @@ function durText(sec) {
  *   lang       'de' | 'en' (Standard: Browsersprache)
  *   theme      'auto' | 'light' | 'dark' ('auto': data-theme am <html>, sonst Systemeinstellung)
  *   time       'logger' | 'utc' | 'local' (Standard: 'logger', wenn der UTC-Versatz aus iparam bekannt ist, sonst 'local')
- *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele kombiniert, eine y-Achse)
+ *   layout     'unit' (ein Diagramm je Einheit, Standard) | 'all' (alle Messkanaele kombiniert, eine y-Achse) |
+ *              'sdi' (ein Diagramm je SDI-12-Geraet, braucht iparam; sonst wie 'unit')
  *   yMin, yMax y-Bereich im kombinierten Diagramm (Standard: aus den Daten, meist ab 0); im Viewer aenderbar wie
  *              der Bereich jedes anderen Diagramms
  *   onLayout   Rueckruf (layout) nach Umschalten durch den Benutzer, z. B. zum Merken
@@ -142,9 +146,10 @@ export function createViewer(el, opts = {}) {
     })
     const st = {
         edt: null, ip: null, ipError: '', series: null, plots: [], tips: new Map(),
+        sdi: [], // Gruppen der Darstellung 'sdi' (leer: keine SDI-Adressen bekannt)
         syncing: false, building: false, hover: null,
         time: o.time ?? null,
-        layout: o.layout === 'all' ? 'all' : 'unit',
+        layout: normLayout(o.layout), // gewaehlt; gilt nur, wenn mit den Daten moeglich (curLayout)
         tiles: !!o.tiles, // Kacheln nebeneinander statt untereinander
         on: new Set(), // Gruppen-Keys der angezeigten Diagramme
         off: new Map(), // Gruppen-Key -> Set ausgeblendeter Kanaele
@@ -250,33 +255,51 @@ export function createViewer(el, opts = {}) {
         st.hover = null
     }
 
-    function chanLabel(c) {
+    // withSdi: SDI-Adresse anhaengen (nicht im Diagramm eines SDI-Geraets, dort steht sie im Titel)
+    function chanLabel(c, withSdi = true) {
         if (c.hk) return t.hk[c.ch] ?? `${t.channel} ${c.ch}`
         let s = `${t.channel} ${c.ch}`
         const sdi = c.meta?.sdi ?? c.meta?.srcSdi // Cache-Kanal: Adresse des Sensors, aus dessen Cache er liest
-        if (sdi) s += ` (SDI ${sdi.addr})`
+        if (sdi && withSdi) s += ` (SDI ${sdi.addr})`
         return s
     }
 
-    // Name eines Kanals in Liste/Werte-Feld; im kombinierten Diagramm mit Einheit (die Achse hat keine)
+    // Name eines Kanals in Liste/Werte-Feld; in Diagrammen mit gemischten Einheiten (kombiniert, SDI-Geraet) mit
+    // Einheit (die Achse hat keine)
     function seriesLabel(g, c) {
-        return g.all ? `${chanLabel(c)} · ${c.unit || t.noUnit}` : chanLabel(c)
+        return g.mixed ? `${chanLabel(c, !g.bySdi)} · ${c.unit || t.noUnit}` : chanLabel(c)
     }
 
-    // Diagramme der aktuellen Darstellung: 'all' fasst die Messkanaele (ab 2 Einheiten) zu einem Diagramm zusammen
+    const sdiName = g => g.sdi != null ? t.sdiDevice(g.sdi) : t.noSdi
+    const unitsHtml = units => `<small>${esc(units.map(u => u || t.noUnit).join(', '))}</small>`
+
+    // Waehlbare Darstellungen der Messkanaele: Kombiniert / Nach Einheiten ab 2 Einheiten, Nach SDI-12-Geraet, wenn
+    // iparam SDI-Adressen liefert. Die gewaehlte gilt nur, wenn sie dabei ist, sonst 'unit'
+    function layoutsOf(s) {
+        const res = s.groups.filter(g => !g.hk).length > 1 ? ['all', 'unit'] : ['unit']
+        if (st.sdi.length) res.push('sdi')
+        return res
+    }
+    const curLayout = s => layoutsOf(s).includes(st.layout) ? st.layout : 'unit'
+
+    // Diagramme der aktuellen Darstellung: 'all' fasst die Messkanaele (ab 2 Einheiten) zu einem Diagramm zusammen,
+    // 'sdi' teilt sie nach SDI-12-Geraet auf; Geraetewerte (HK) immer nach Einheit
     function viewGroups(s) {
+        const hk = s.groups.filter(g => g.hk)
+        const lay = curLayout(s)
+        if (lay === 'sdi') return [...st.sdi, ...hk]
+        if (lay !== 'all') return s.groups
         const meas = s.groups.filter(g => !g.hk)
-        if (st.layout !== 'all' || meas.length < 2) return s.groups
         const channels = meas.flatMap(g => g.channels).sort((a, b) => a.ch - b.ch)
-        return [{ key: ALL_KEY, hk: false, all: true, unit: '', units: meas.map(g => g.unit), channels },
-            ...s.groups.filter(g => g.hk)]
+        return [{ key: ALL_KEY, hk: false, all: true, mixed: true, unit: '', units: meas.map(g => g.unit), channels }, ...hk]
     }
 
     // Titel (HTML): Einheit bzw. HK-Name; fruehere Einheiten der Kanaele (anderer Parametersatz) gedimmt
     function groupTitle(g) {
-        if (g.all) return esc(t.allChannels) + ` <small>${esc(g.units.map(u => u || t.noUnit).join(', '))}</small>`
+        if (g.all) return esc(t.allChannels) + ' ' + unitsHtml(g.units)
+        if (g.bySdi) return esc(sdiName(g)) + ' ' + unitsHtml(g.units)
         const unit = g.unit || t.noUnit
-        if (g.hk) return esc(`${g.channels.map(chanLabel).join(', ')} · ${unit}`)
+        if (g.hk) return esc(`${g.channels.map(c => chanLabel(c)).join(', ')} · ${unit}`)
         const older = [...new Set(g.channels.flatMap(c => c.units))].filter(u => u !== g.unit).map(u => u || t.noUnit)
         return esc(unit) + (older.length ? ` <small>${esc(t.unitChanged)}: ${esc(older.join(', '))}</small>` : '')
     }
@@ -490,7 +513,7 @@ export function createViewer(el, opts = {}) {
     // ---------- Diagramme ----------
     // Knopf je Diagramm in der Auswahl-Leiste (ein/aus)
     function chipHtml(g) {
-        const label = g.all ? t.allChannels : g.hk ? g.channels.map(chanLabel).join(', ') : (g.unit || t.noUnit)
+        const label = g.all ? t.allChannels : g.bySdi ? sdiName(g) : g.hk ? g.channels.map(c => chanLabel(c)).join(', ') : (g.unit || t.noUnit)
         const info = g.hk ? (g.unit || t.noUnit) : t.nChannels(g.channels.length)
         const values = new Intl.NumberFormat(locale).format(g.channels.reduce((n, c) => n + c.count, 0))
         return `<button type="button" class="lv-chip" data-key="${esc(g.key)}" aria-pressed="${st.on.has(g.key)}"`
@@ -619,8 +642,9 @@ export function createViewer(el, opts = {}) {
         const ranges = [30, 7, 1].filter(d => d * DAY < span)
 
         const groups = viewGroups(s)
+        const layouts = layoutsOf(s), layout = curLayout(s)
         let selHtml = ''
-        if (s.groups.length > 1) {
+        if (s.groups.length > 1 || layouts.length > 1) {
             const row = hk => {
                 const gs = groups.filter(g => g.hk === hk)
                 return gs.length ? `<div class="lv-sel-row"><span class="lv-sel-h">${esc(hk ? t.device : t.measurements)}</span>`
@@ -629,10 +653,12 @@ export function createViewer(el, opts = {}) {
             const seg = (attr, v, pressed, l, tip = '') => `<button type="button" data-${attr}="${v}" aria-pressed="${pressed}"`
                 + `${tip ? ` title="${esc(tip)}"` : ''}>${esc(l)}</button>`
             const segs = []
-            // Darstellung der Messkanaele nur mit mehreren Einheiten waehlbar
-            if (s.groups.filter(g => !g.hk).length > 1) {
+            // Darstellung der Messkanaele: Kombiniert / Nach Einheiten nur mit mehreren Einheiten, Nach SDI-12-Geraet
+            // nur mit SDI-Adressen
+            if (layouts.length > 1) {
+                const name = { all: [t.layoutAll], unit: [t.layoutUnit], sdi: [t.layoutSdi, t.layoutSdiTip] }
                 segs.push(`<div class="lv-seg" role="group" aria-label="${esc(t.layout)}">`
-                    + seg('layout', 'all', st.layout === 'all', t.layoutAll) + seg('layout', 'unit', st.layout === 'unit', t.layoutUnit) + `</div>`)
+                    + layouts.map(l => seg('layout', l, layout === l, ...name[l])).join('') + `</div>`)
             }
             // Untereinander / Kacheln: nur, wenn ein Bereich (Messwerte oder Geraetewerte) mehrere Diagramme hat
             if (groups.filter(g => !g.hk).length > 1 || groups.filter(g => g.hk).length > 1) {
@@ -749,7 +775,7 @@ export function createViewer(el, opts = {}) {
         }
 
         el.querySelectorAll('.lv-seg [data-layout]').forEach(b => b.addEventListener('click', () => {
-            if (st.layout === b.dataset.layout) return
+            if (layout === b.dataset.layout) return
             st.layout = b.dataset.layout
             o.onLayout?.(st.layout)
             render() // Zeitraum (st.range) bleibt
@@ -806,12 +832,14 @@ export function createViewer(el, opts = {}) {
                 }
             }
             st.series = buildSeries(st.edt, st.ip)
+            st.sdi = sdiGroups(st.series).map(g => ({ ...g, bySdi: true, mixed: true }))
             // Vorauswahl: alle Messwert-Diagramme (gibt es keine: alle Diagramme), alle Kanaele sichtbar
             const groups = st.series.groups
             const meas = groups.filter(g => !g.hk)
             st.on = new Set((meas.length ? meas : groups).map(g => g.key))
             if (meas.length) st.on.add(ALL_KEY)
-            st.off = new Map(groups.map(g => [g.key, new Set()]))
+            for (const g of st.sdi) st.on.add(g.key)
+            st.off = new Map([...groups, ...st.sdi].map(g => [g.key, new Set()]))
             st.off.set(ALL_KEY, new Set())
             st.range = null
             st.yr = new Map([[ALL_KEY, yInit()]]) // neue Daten: y-Bereiche neu berechnen (kombiniert: wie in den Optionen)
@@ -850,7 +878,7 @@ export function createViewer(el, opts = {}) {
         setOptions(n = {}) {
             Object.assign(o, n)
             if (n.time !== undefined) st.time = n.time
-            if (n.layout !== undefined) st.layout = n.layout === 'all' ? 'all' : 'unit'
+            if (n.layout !== undefined) st.layout = normLayout(n.layout)
             if (n.tiles !== undefined) st.tiles = !!n.tiles
             if (n.yMin !== undefined || n.yMax !== undefined) st.yr.set(ALL_KEY, yInit())
             render()

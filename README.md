@@ -8,7 +8,8 @@ Verwendet in **enviLog** (Bluetooth-App) und als eigenständige Seite, z. B. auf
 
 ## Funktionen
 
-- Messkanäle wahlweise ein Diagramm je Einheit oder alle in einem Diagramm (Kombiniert: eine gemeinsame y-Achse ohne Trennung nach Einheiten, auch bei bis zu 90 Kanälen); y-Bereich bei jedem Diagramm in y min / y max änderbar, „auto“ trägt runde Grenzen aus den sichtbaren Werten ein, meist ab 0;
+- Messkanäle wahlweise ein Diagramm je Einheit, alle in einem Diagramm (Kombiniert: eine gemeinsame y-Achse ohne Trennung nach Einheiten, auch bei bis zu 90 Kanälen) oder ein Diagramm je SDI-12-Gerät (Nach SDI-12-Gerät: Adresse aus iparam,
+  Cache-Kanäle beim Sensor davor, Kanäle ohne SDI-12 in einem eigenen Diagramm; nur mit iparam); y-Bereich bei jedem Diagramm in y min / y max änderbar, „auto“ trägt runde Grenzen aus den sichtbaren Werten ein, meist ab 0;
   Gerätewerte (Kanäle 90–99: Batterie, Innentemperatur …) getrennt
 - Anordnung untereinander oder als Kacheln nebeneinander (je Bereich Messwerte/Gerätewerte so viele Spalten, wie mit
   Mindestbreite passen, schmal eine; Kanalliste dann unter dem Diagramm, Diagramme etwas niedriger). Zeigt ein Bereich
@@ -61,7 +62,7 @@ Optionen von `createViewer(el, opts)`:
 | `lang` | Browsersprache | `'de'` oder `'en'` |
 | `theme` | `'auto'` | `'light'`, `'dark'`; `'auto'` = `data-theme` am `<html>`, sonst Systemeinstellung |
 | `time` | `'logger'` bzw. `'local'` | `'logger'` (nur mit iparam), `'utc'`, `'local'` |
-| `layout` | `'unit'` | Messkanäle: `'unit'` = ein Diagramm je Einheit, `'all'` = alle kombiniert in einem Diagramm (eine gemeinsame y-Achse); im Viewer umschaltbar (ab 2 Einheiten) |
+| `layout` | `'unit'` | Messkanäle: `'unit'` = ein Diagramm je Einheit, `'all'` = alle kombiniert in einem Diagramm (eine gemeinsame y-Achse), `'sdi'` = ein Diagramm je SDI-12-Gerät (braucht iparam, sonst wie `'unit'`); im Viewer umschaltbar (Kombiniert ab 2 Einheiten, SDI mit SDI-Adressen) |
 | `yMin`, `yMax` | – | y-Bereich im kombinierten Diagramm (fehlt = aus den Daten berechnet, meist ab 0); im Viewer änderbar, `viewer.yRange` liefert den aktuellen, `viewer.yRanges` die aller Diagramme (Schlüssel = Diagramm) |
 | `onLayout` | – | Rückruf `(layout)` nach Umschalten durch den Benutzer, z. B. zum Merken |
 | `tiles` | `false` | `true` = Diagramme als Kacheln nebeneinander; im Viewer umschaltbar (Untereinander/Kacheln), Getter `viewer.tiles` |

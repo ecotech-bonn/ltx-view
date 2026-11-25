@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseEdt, parseValue } from '../src/edt.js'
 import { parseIparam } from '../src/iparam.js'
-import { buildSeries, niceRange, findGaps } from '../src/series.js'
+import { buildSeries, niceRange, findGaps, sdiGroups } from '../src/series.js'
 
 const EX1 = `<NEW>
 <NT AUTO OK(6)>
@@ -163,4 +163,21 @@ test('series: few values far apart are not joined (fallback: typical row interva
 
 test('niceRange: step 2.5 avoids wasting space', () => {
     assert.deepEqual(niceRange(-13, 1017), [-250, 1250])
+})
+
+test('sdiGroups: one group per SDI address in channel order, channels without SDI last', () => {
+    const base = '@100\n1700\n30\n31\n1000000000\nLTX\n600\n0\n0\n3600\n0\n3600\n3\n31\n6\n1\n0\n-10\n0\n\n0\n'
+    const ch = (n, action, unit, xb) => `@${n}\n${action}\n768\n\n0\n${unit}\n9\n0\n0.0\n1.0\n\n\n60\n${xb}\n`
+    // 0: Sensor SDI 3 (oC), 1: Cache (%), 2: ohne SDI (V), 3: Sensor SDI 0 (mm), 4: Cache (oC)
+    const ip = parseIparam(base + ch(0, 1, 'oC', '3M') + ch(1, 3, '%', '') + ch(2, 1, 'V', '') + ch(3, 1, 'mm', '0M1') + ch(4, 3, 'oC', ''))
+    // Kanal 5 hat Daten, fehlt aber im iparam (anderer Parametersatz)
+    const edt = parseEdt('!U 0:oC 1:% 2:V 3:mm 4:oC 5:m 90:V\n!1700000000 0:1 1:2 2:3 3:4 4:5 5:6 90:3.6\n!+600 0:1 1:2 2:3 3:4 4:5 5:6\n')
+    const g = sdiGroups(buildSeries(edt, ip))
+    assert.deepEqual(g.map(x => [x.key, x.sdi, x.channels.map(c => c.ch), x.units]), [
+        ['sdi:3', '3', [0, 1], ['oC', '%']],
+        ['sdi:0', '0', [3, 4], ['mm', 'oC']],
+        ['sdi:-', null, [2, 5], ['V', 'm']],
+    ])
+    assert.ok(g.every(x => !x.hk))
+    assert.deepEqual(sdiGroups(buildSeries(edt, null)), []) // ohne iparam keine SDI-Adressen
 })

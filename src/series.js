@@ -105,6 +105,27 @@ export function niceRange(lo, hi) {
     return [min, max]
 }
 
+/* Messkanaele nach SDI-12-Geraet (Adresse) gruppieren, fuer die Darstellung 'sdi'. series: Ergebnis von buildSeries().
+ * Adresse aus iparam wie im Kanalnamen: eigene Extra-Bytes, bei Cache-Kanaelen die des Sensors davor. Geraete in der
+ * Reihenfolge ihrer kleinsten Kanalnummer, Kanaele ohne SDI-Adresse (anderer Sensor, Kanal fehlt im iparam) am Ende in
+ * einer eigenen Gruppe. -> [{ key: 'sdi:<Adresse>' bzw. 'sdi:-', hk: false, sdi: Adresse | null, units, channels }],
+ * leer, wenn kein Kanal eine SDI-Adresse hat (z. B. ohne iparam) */
+export function sdiGroups(series) {
+    const map = new Map()
+    for (const c of series.channels) {
+        if (c.hk) continue
+        const addr = (c.meta?.sdi ?? c.meta?.srcSdi)?.addr ?? null
+        const key = 'sdi:' + (addr ?? '-')
+        if (!map.has(key)) map.set(key, { key, hk: false, sdi: addr, units: [], channels: [] })
+        const g = map.get(key)
+        g.channels.push(c)
+        if (!g.units.includes(c.unit)) g.units.push(c.unit)
+    }
+    const groups = [...map.values()]
+    if (!groups.some(g => g.sdi != null)) return []
+    return groups.sort((a, b) => ((a.sdi == null) - (b.sdi == null)) || (a.channels[0].ch - b.channels[0].ch))
+}
+
 /* edt: Ergebnis von parseEdt(), ip: Ergebnis von parseIparam() oder null
  * opts: { gapFactor: Abstand > gapFactor x normaler Abstand = Aussetzer (Standard 1.5, d. h. ab einem fehlenden Wert) }
  * -> { x: [zeit...] (UTC-Sekunden, sortiert), channels: [...], groups: [...], sets: [{no, t0, t1, cookie}], events, stats } */
